@@ -1,0 +1,10 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "riftneighbours",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-16",
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": ["/api/*", "/auth/*"] },
+  "triggers": { "crons": ["5 16 * * *"] },
+  "vars": { "GOOGLE_CLIENT_ID": "", "APP_ORIGIN": "http://localhost:8787" }
+  // After creating D1, add: "d1_databases": [{"binding":"DB","database_name":"riftneighbours","database_id":"YOUR_ID","migrations_dir":"migrations"}]
+}
