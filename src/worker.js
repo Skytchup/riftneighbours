@@ -1,4 +1,4 @@
-import { SLOTS, singaporeDate, singaporeDay, validDate, preferencesValid, text } from './domain.js';
+import { SLOTS, singaporeDate, singaporeDay, validDate, preferencesValid, text, deckPreferencesValid } from './domain.js';
 const json=(v,s=200,h={})=>new Response(JSON.stringify(v),{status:s,headers:{'content-type':'application/json','cache-control':'no-store',...h}});
 const now=()=>Math.floor(Date.now()/1000);
 const cookie=(name,value,max)=>`${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${max}; Secure`;
@@ -33,7 +33,7 @@ async function handle(req,env){
  const db=env.DB,uid=user.id;
  if(p==='/api/logout'&&req.method==='POST'){await db.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await hash(cookies(req).rn_session||'')).run();return json({ok:true},200,{'set-cookie':cookie('rn_session','',0)})}
  const read=async()=>{if(Number(req.headers.get('content-length'))>12000)throw Error('body too large');const raw=await req.text();if(raw.length>12000)throw Error('body too large');return JSON.parse(raw)};
- if(p==='/api/me'&&req.method==='GET')return json({user,preferences:(await db.prepare('SELECT day,slot FROM preferences WHERE user_id=?').bind(uid).all()).results,decks:(await db.prepare('SELECT id,name,lend FROM decks WHERE user_id=?').bind(uid).all()).results,confirmations:(await db.prepare('SELECT date,slot FROM confirmations WHERE user_id=? AND date>=?').bind(uid,singaporeDate()).all()).results,areas:(await db.prepare('SELECT * FROM areas ORDER BY neighbourhood,name').all()).results});
+ if(p==='/api/me'&&req.method==='GET')return json({user,preferences:(await db.prepare('SELECT day,slot FROM preferences WHERE user_id=?').bind(uid).all()).results,decks:(await db.prepare('SELECT id,name FROM decks WHERE user_id=?').bind(uid).all()).results,confirmations:(await db.prepare('SELECT date,slot FROM confirmations WHERE user_id=? AND date>=?').bind(uid,singaporeDate()).all()).results,areas:(await db.prepare('SELECT * FROM areas ORDER BY neighbourhood,name').all()).results});
  if(p==='/api/profile'&&req.method==='PUT'){
   const b=await read();if(!text(b.username,30)||!['casual','learning','teaching'].includes(b.style)||!await db.prepare('SELECT id FROM areas WHERE id=?').bind(b.area_id).first())return json({error:'Choose a username, area and play style'},400);
   await db.prepare('UPDATE users SET username=?,area_id=?,style=?,share_condo=? WHERE id=?').bind(b.username.trim(),b.area_id,b.style,b.share_condo===true?1:0,uid).run();return json({ok:true});
@@ -47,8 +47,8 @@ async function handle(req,env){
   await db.prepare(b.available?'INSERT OR IGNORE INTO confirmations VALUES(?,?,?)':'DELETE FROM confirmations WHERE user_id=? AND date=? AND slot=?').bind(uid,singaporeDate(),b.slot).run();return json({ok:true});
  }
  if(p==='/api/decks'&&req.method==='PUT'){
-  const b=await read();if(!Array.isArray(b.decks)||b.decks.length>12||!b.decks.every(d=>text(d.name,60)&&typeof d.lend==='boolean'))return json({error:'Invalid deck list'},400);
-  await db.batch([db.prepare('DELETE FROM decks WHERE user_id=?').bind(uid),...b.decks.map(d=>db.prepare('INSERT INTO decks VALUES(?,?,?,?)').bind(crypto.randomUUID(),uid,d.name.trim(),d.lend?1:0))]);return json({ok:true});
+  const b=await read();if(!Array.isArray(b.decks)||b.decks.length>12||!b.decks.every(d=>text(d.name,60)))return json({error:'Invalid deck list'},400);
+  await db.batch([db.prepare('DELETE FROM decks WHERE user_id=?').bind(uid),...b.decks.map(d=>db.prepare('INSERT INTO decks VALUES(?,?,?,?)').bind(crypto.randomUUID(),uid,d.name.trim(),0))]);return json({ok:true});
  }
  if(!user.area_id)return json({error:'Set your area in your profile first'},400);
  const visible=`NOT EXISTS(SELECT 1 FROM blocks b WHERE (b.user_id=? AND b.blocked_id=u.id) OR (b.user_id=u.id AND b.blocked_id=?))`;
@@ -67,13 +67,13 @@ async function handle(req,env){
   }return json({counts,date:today,scope});
  }
  if(p==='/api/games'&&req.method==='GET'){
-  const rows=(await db.prepare(`SELECT g.id,g.user_id,g.title,g.date,g.slot,g.venue FROM games g JOIN users u ON u.id=g.user_id JOIN areas a ON a.id=g.area_id WHERE a.neighbourhood=(SELECT neighbourhood FROM areas WHERE id=?) AND g.date>=? AND ${visible} ORDER BY g.date,g.created_at LIMIT 50`).bind(user.area_id,singaporeDate(),uid,uid).all()).results;
+  const rows=(await db.prepare(`SELECT g.id,g.user_id,g.title,g.date,g.slot,g.venue,g.deck_need,g.extra_decks FROM games g JOIN users u ON u.id=g.user_id JOIN areas a ON a.id=g.area_id WHERE a.neighbourhood=(SELECT neighbourhood FROM areas WHERE id=?) AND g.date>=? AND ${visible} ORDER BY g.date,g.created_at LIMIT 50`).bind(user.area_id,singaporeDate(),uid,uid).all()).results;
   return json({games:rows});
  }
  if(p==='/api/games'&&req.method==='POST'){
-  const b=await read();if(!text(b.title,80)||!validDate(b.date)||b.date<singaporeDate()||!SLOTS.includes(b.slot)||!['decide','shared','cafe'].includes(b.venue))return json({error:'Check title, date and venue'},400);
+  const b=await read();if(!text(b.title,80)||!validDate(b.date)||b.date<singaporeDate()||!SLOTS.includes(b.slot)||!['decide','shared','cafe'].includes(b.venue)||!deckPreferencesValid(b))return json({error:'Check title, date and venue'},400);
   const recent=await db.prepare('SELECT count(*) n FROM games WHERE user_id=? AND created_at>?').bind(uid,now()-86400).first();if(recent.n>=5)return json({error:'Please limit suggestions to five per day'},429);
-  const id=crypto.randomUUID();await db.prepare('INSERT INTO games VALUES(?,?,?,?,?,?,?,?,?)').bind(id,uid,user.area_id,b.title.trim(),b.date,b.slot,b.venue,'',now()).run();return json({id},201);
+  const id=crypto.randomUUID();await db.prepare('INSERT INTO games(id,user_id,area_id,title,date,slot,venue,details,created_at,deck_need,extra_decks) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(id,uid,user.area_id,b.title.trim(),b.date,b.slot,b.venue,'',now(),b.deck_need,b.extra_decks?1:0).run();return json({id},201);
  }
  const match=p.match(/^\/api\/games\/([a-zA-Z0-9-]+)(?:\/(join|requests|messages|venue))?$/);
  if(match){const id=match[1],action=match[2];const game=await db.prepare('SELECT g.*,u.username FROM games g JOIN users u ON u.id=g.user_id WHERE g.id=?').bind(id).first();if(!game)return json({error:'Game not found'},404);
@@ -81,10 +81,11 @@ async function handle(req,env){
   const owner=game.user_id===uid;const request=await db.prepare('SELECT status FROM requests WHERE game_id=? AND user_id=?').bind(id,uid).first();const participant=owner||request?.status==='accepted';
   if(action==='join'&&req.method==='POST'){
    const allowed=await db.prepare('SELECT 1 FROM areas a JOIN areas b ON a.neighbourhood=b.neighbourhood WHERE a.id=? AND b.id=?').bind(user.area_id,game.area_id).first();if(!allowed||owner||game.date<singaporeDate())return json({error:'Cannot join this game'},400);
-   await db.prepare('INSERT OR IGNORE INTO requests VALUES(?,?,?,?)').bind(crypto.randomUUID(),id,uid,'pending').run();return json({ok:true});
+   const b=await read();if(!deckPreferencesValid(b))return json({error:'Choose whether you need a deck'},400);
+   await db.prepare('INSERT INTO requests(id,game_id,user_id,status,deck_need,extra_decks) VALUES(?,?,?,?,?,?) ON CONFLICT(game_id,user_id) DO UPDATE SET deck_need=excluded.deck_need,extra_decks=excluded.extra_decks').bind(crypto.randomUUID(),id,uid,'pending',b.deck_need,b.extra_decks?1:0).run();return json({ok:true});
   }
   if(action==='requests'&&owner){
-   if(req.method==='GET')return json({requests:(await db.prepare('SELECT r.id,r.status,u.username FROM requests r JOIN users u ON u.id=r.user_id WHERE game_id=?').bind(id).all()).results});
+   if(req.method==='GET')return json({requests:(await db.prepare('SELECT r.id,r.status,r.deck_need,r.extra_decks,u.username FROM requests r JOIN users u ON u.id=r.user_id WHERE game_id=?').bind(id).all()).results});
    if(req.method==='PUT'){const b=await read();if(!['accepted','declined'].includes(b.status))return json({error:'Invalid decision'},400);await db.prepare('UPDATE requests SET status=? WHERE id=? AND game_id=?').bind(b.status,b.id,id).run();return json({ok:true})}
   }
   if(action==='venue'&&owner&&req.method==='PUT'){const b=await read();if(!text(b.details,500))return json({error:'Enter meeting instructions'},400);await db.prepare('UPDATE games SET details=? WHERE id=?').bind(b.details.trim(),id).run();return json({ok:true})}
@@ -94,7 +95,7 @@ async function handle(req,env){
   }
   return json({error:'Not allowed'},403);
  }
- if(p==='/api/my-games'&&req.method==='GET')return json({games:(await db.prepare('SELECT g.id,g.title,g.date,g.slot,g.user_id,r.status FROM games g LEFT JOIN requests r ON r.game_id=g.id AND r.user_id=? WHERE g.user_id=? OR r.user_id=? ORDER BY g.date DESC LIMIT 50').bind(uid,uid,uid).all()).results});
+ if(p==='/api/my-games'&&req.method==='GET')return json({games:(await db.prepare('SELECT g.id,g.title,g.date,g.slot,g.user_id,g.deck_need,g.extra_decks,r.status,r.deck_need AS request_deck_need,r.extra_decks AS request_extra_decks FROM games g LEFT JOIN requests r ON r.game_id=g.id AND r.user_id=? WHERE g.user_id=? OR r.user_id=? ORDER BY g.date DESC LIMIT 50').bind(uid,uid,uid).all()).results});
  if(p==='/api/blocks'&&req.method==='POST'){const b=await read();if(!text(b.user_id,80)||b.user_id===uid)return json({error:'Invalid member'},400);await db.prepare('INSERT OR IGNORE INTO blocks VALUES(?,?)').bind(uid,b.user_id).run();return json({ok:true})}
  if(p==='/api/report'&&req.method==='POST'){const b=await read();if(!text(b.reason,500)||!text(b.game_id,80))return json({error:'Enter a reason'},400);const recent=await db.prepare('SELECT count(*) n FROM reports WHERE user_id=? AND created_at>?').bind(uid,now()-3600).first();if(recent.n>=5)return json({error:'Report limit reached'},429);await db.prepare('INSERT INTO reports VALUES(?,?,?,?,?)').bind(crypto.randomUUID(),uid,b.game_id,b.reason,now()).run();return json({ok:true})}
  if(p==='/api/account'&&req.method==='DELETE'){await db.batch([db.prepare('DELETE FROM games WHERE user_id=?').bind(uid),db.prepare('DELETE FROM users WHERE id=?').bind(uid)]);return json({ok:true},200,{'set-cookie':cookie('rn_session','',0)})}

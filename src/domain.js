@@ -6,3 +6,5 @@ export function preferencesValid(items) { return Array.isArray(items) && items.l
 export function text(value,max=200) { return typeof value==='string' && value.trim().length>0 && value.trim().length<=max; }
 // Prevent exact counts of one or two exposing an individual's routine.
 export function privateCount(n) { return n < 3 ? (n ? 'A few' : 'No') : String(n); }
+
+export function deckPreferencesValid(b) { return ["own","need"].includes(b.deck_need) && typeof b.extra_decks === "boolean" && !(b.deck_need === "need" && b.extra_decks); }

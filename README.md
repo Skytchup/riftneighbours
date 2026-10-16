@@ -115,3 +115,27 @@ The tests run the actual Worker routes with a SQLite-backed D1 adapter. They cov
 - Game cancellation/capacity controls, optional deck-request details, accessible user-facing block management and notification preferences.
 
 The priority is observing real games arranged and repeat participation, rather than maximising profile counts. Brand/name clearance and Riot fan-project requirements should be reviewed before public promotion.
+
+## October 17: compact interface and per-game decks
+
+The Nearby screen now opens on availability, without a marketing hero. Official Riftbound logo/art references are from playriftbound.com (Riot CDN); the fan-project attribution remains. External image availability depends on the publisher. No affiliation is implied.
+
+Deck lists are names only. On suggesting/joining a game, choose `own` or `need` and optionally offer extra decks. Organisers see these choices in requests. A deck request is not a guaranteed loan. Apply migration `0002_game_deck_preferences.sql` before running this version against live D1. The old `decks.lend` column is retained but unused.
+
+### URA-backed searchable location catalogue
+
+The profile uses an autocomplete input backed by the `areas` table. Import official project names once and refresh periodically rather than calling URA from each user's browser.
+
+URA requires registration and an access key: https://eservice.ura.gov.sg/maps/api/
+The rental-search page excludes developments without rental contracts in the last 60 months; the median API also has rental-count coverage thresholds. Neither is an exhaustive condo register. Imported projects are grouped by **postal district**, a coarse grouping, not a claim that every project is within walking distance. Keep curated HDB/estate entries alongside imported private projects. Review URA's API terms and display appropriate attribution when publishing imported data.
+
+```sh
+# Set URA_ACCESS_KEY in your local environment, never in frontend code or git.
+node scripts/import-ura-areas.mjs --output ura-areas.sql
+# Or use a downloaded official data-service JSON response (array of responses accepted):
+node scripts/import-ura-areas.mjs --input ura-export.json --output ura-areas.sql
+# Review the generated project list, then import into your configured database:
+npx wrangler d1 execute riftneighbours --remote --file ura-areas.sql
+```
+
+This adds/updates stable project IDs; it never removes existing locations or reassigns users. Only project name, street-derived stable ID and district grouping are used, not prices, tenants or unit addresses. No catalogue has been fetched/imported without the operator's URA key. The demo still uses clearly fictional locations.
