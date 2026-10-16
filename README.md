@@ -1,7 +1,6 @@
 # RiftNeighbours
 
-**Your next game is closer than you think.** A Singapore neighbourhood community for casual Riftbound. Find overlapping availability first; agree a venue together. Nobody has to offer their home.
-
+**Your next game is closer than you think.** A Singapore neighbourhood community for casual Riftbound. Find overlapping availability first; agree a venue together.
 ## This first implementation
 
 - Responsive cream/teal/coral interface, without a frontend build dependency.
