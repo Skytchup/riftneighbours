@@ -1,6 +1,8 @@
 import { SLOTS, singaporeDate, singaporeDay, validDate, preferencesValid, text, deckPreferencesValid } from './domain.js';
 import { planningAreas, locationChoices } from './areas.js';
 import { oneMap, LocationError } from './onemap.js';
+import { ensureSchema } from './schema.js';
+import { prepareDecks, deckStatements } from './decks.js';
 const locationLimits=new Map();
 function allowLocationSearch(uid){
  const time=Date.now(),entry=locationLimits.get(uid);
@@ -49,6 +51,7 @@ async function handle(req,env){
  const user=await env.DB.prepare('SELECT u.id,u.username,u.area_id,u.style,u.share_condo FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=? AND s.expires_at>?').bind(await hash(cookies(req).rn_session||''),now()).first();
  if(!user)return json({error:'Please sign in'},401);
  const db=env.DB,uid=user.id;
+ await ensureSchema(db);
  if(p==='/api/logout'&&req.method==='POST'){await db.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await hash(cookies(req).rn_session||'')).run();return json({ok:true},200,{'set-cookie':cookie('rn_session','',0)})}
  const read=async()=>{if(Number(req.headers.get('content-length'))>12000)throw Error('body too large');const raw=await req.text();if(raw.length>12000)throw Error('body too large');return JSON.parse(raw)};
  if(p==='/api/locations'&&req.method==='GET'){
@@ -58,9 +61,11 @@ async function handle(req,env){
   try{return json({results:await oneMap(env).search(query),source:'OneMap / Singapore Land Authority'})}
   catch(error){if(error instanceof LocationError)return json({error:error.message},503);throw error}
  }
- if(p==='/api/me'&&req.method==='GET')return json({user,preferences:(await db.prepare('SELECT day,slot FROM preferences WHERE user_id=?').bind(uid).all()).results,decks:(await db.prepare('SELECT id,name FROM decks WHERE user_id=?').bind(uid).all()).results,confirmations:(await db.prepare('SELECT date,slot FROM confirmations WHERE user_id=? AND date>=?').bind(uid,singaporeDate()).all()).results,areas:locationChoices((await db.prepare('SELECT * FROM areas ORDER BY neighbourhood,name').all()).results)});
+ if(p==='/api/me'&&req.method==='GET')return json({user,preferences:(await db.prepare('SELECT day,slot FROM preferences WHERE user_id=?').bind(uid).all()).results,decks:(await db.prepare('SELECT id,name,legend_id,custom_name FROM decks WHERE user_id=?').bind(uid).all()).results,confirmations:(await db.prepare('SELECT date,slot FROM confirmations WHERE user_id=? AND date>=?').bind(uid,singaporeDate()).all()).results,areas:locationChoices((await db.prepare('SELECT * FROM areas ORDER BY neighbourhood,name').all()).results)});
  if(p==='/api/profile'&&req.method==='PUT'){
   const b=await read();
+  const decks=b.decks===undefined?undefined:prepareDecks(b.decks);
+  if(decks===null)return json({error:'Choose a valid Legend for each deck; deck names are optional (60 characters maximum).'},400);
   if(!text(b.username,30)||!['casual','learning','teaching'].includes(b.style)||!text(b.area_id,100)||(b.condo_name!==undefined&&(typeof b.condo_name!=='string'||b.condo_name.length>100)))return json({error:'Choose a username, area and play style'},400);
   const planning=planningAreas.find(a=>a.id===b.area_id);
   let selected=planning||await db.prepare('SELECT * FROM areas WHERE id=?').bind(b.area_id).first();
@@ -81,7 +86,8 @@ async function handle(req,env){
   const share=b.share_condo===true&&!selected.id.startsWith('sg-pa-')?1:0;
   await db.batch([
    db.prepare('INSERT OR IGNORE INTO areas(id,name,neighbourhood) VALUES(?,?,?)').bind(selected.id,selected.name,selected.neighbourhood),
-   db.prepare('UPDATE users SET username=?,area_id=?,style=?,share_condo=? WHERE id=?').bind(b.username.trim(),selected.id,b.style,share,uid)
+   db.prepare('UPDATE users SET username=?,area_id=?,style=?,share_condo=? WHERE id=?').bind(b.username.trim(),selected.id,b.style,share,uid),
+   ...(decks===undefined?[]:deckStatements(db,uid,decks))
   ]);
   return json({ok:true,area:{...selected,kind:selected.id.startsWith('sg-pa-')?'neighbourhood':'condo'}});
  }
@@ -94,8 +100,8 @@ async function handle(req,env){
   await db.prepare(b.available?'INSERT OR IGNORE INTO confirmations VALUES(?,?,?)':'DELETE FROM confirmations WHERE user_id=? AND date=? AND slot=?').bind(uid,singaporeDate(),b.slot).run();return json({ok:true});
  }
  if(p==='/api/decks'&&req.method==='PUT'){
-  const b=await read();if(!Array.isArray(b.decks)||b.decks.length>12||!b.decks.every(d=>text(d.name,60)))return json({error:'Invalid deck list'},400);
-  await db.batch([db.prepare('DELETE FROM decks WHERE user_id=?').bind(uid),...b.decks.map(d=>db.prepare('INSERT INTO decks VALUES(?,?,?,?)').bind(crypto.randomUUID(),uid,d.name.trim(),0))]);return json({ok:true});
+  const b=await read(),decks=prepareDecks(b.decks);if(!decks)return json({error:'Choose a valid Legend and an optional deck name (60 characters maximum).'},400);
+  await db.batch(deckStatements(db,uid,decks));return json({ok:true});
  }
  if(!user.area_id)return json({error:'Set your area in your profile first'},400);
  const visible=`NOT EXISTS(SELECT 1 FROM blocks b WHERE (b.user_id=? AND b.blocked_id=u.id) OR (b.user_id=u.id AND b.blocked_id=?))`;

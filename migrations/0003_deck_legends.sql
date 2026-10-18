@@ -1,0 +1,2 @@
+ALTER TABLE decks ADD COLUMN legend_id TEXT;
+ALTER TABLE decks ADD COLUMN custom_name TEXT NOT NULL DEFAULT '';

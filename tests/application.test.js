@@ -5,8 +5,9 @@ import {readFileSync} from 'node:fs';
 import worker from '../src/worker.js';
 import {singaporeDate,singaporeDay,preferencesValid,validDate} from '../src/domain.js';
 import {planningAreas} from '../src/areas.js';
+import {legends} from '../public/legends.js';
 const digest=async s=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))).map(x=>x.toString(16).padStart(2,'0')).join('');
-async function fixture(){const sql=new DatabaseSync(':memory:');sql.exec(readFileSync(new URL('../migrations/0001_initial.sql',import.meta.url),'utf8'));sql.exec(readFileSync(new URL('../migrations/0002_game_deck_preferences.sql',import.meta.url),'utf8'));
+async function fixture({legacy=false}={}){const sql=new DatabaseSync(':memory:');sql.exec(readFileSync(new URL('../migrations/0001_initial.sql',import.meta.url),'utf8'));if(!legacy)sql.exec(readFileSync(new URL('../migrations/0002_game_deck_preferences.sql',import.meta.url),'utf8'));
  const DB={prepare(query){return {args:[],bind(...args){this.args=args;return this},async first(){return sql.prepare(query).get(...this.args)||null},async all(){return {results:sql.prepare(query).all(...this.args)}},async run(){return sql.prepare(query).run(...this.args)}}},async batch(items){sql.exec('BEGIN');try{const results=[];for(const i of items)results.push(await i.run());sql.exec('COMMIT');return results}catch(e){sql.exec('ROLLBACK');throw e}}};
  sql.exec("INSERT INTO areas VALUES ('a','Test estate','East'),('b','Other estate','East'),('c','Distant estate','West')");
  for(const [id,area] of [['me','a'],['other','a'],['third','b'],['far','c']]){sql.prepare('INSERT INTO users VALUES(?,?,?,?,?,?,?)').run(id,id,id+'-secret-name',area,'casual',1,0);sql.prepare('INSERT INTO sessions VALUES(?,?,?)').run(await digest(id),id,Math.floor(Date.now()/1000)+3600)}
@@ -15,6 +16,33 @@ async function fixture(){const sql=new DatabaseSync(':memory:');sql.exec(readFil
  return {sql,call,env};}
 test('Singapore date rolls over independently of UTC',()=>{assert.equal(singaporeDate(new Date('2026-10-16T16:01:00Z')),'2026-10-17');assert.equal(singaporeDay('2026-10-17'),6);assert.equal(validDate('2026-02-30'),false);assert.equal(preferencesValid([{day:7,slot:'evening'}]),false);assert.equal(preferencesValid([{day:1,slot:'evening'},{day:1,slot:'evening'}]),false)});
 test('authentication and cross-origin writes fail closed',async()=>{const {call}=await fixture();assert.equal((await call('me','GET',null,'invalid')).status,401);assert.equal((await call('tonight','PUT',{slot:'evening',available:true},'me','https://evil.test')).status,403)});
+
+test('manual initial schema upgrades safely and profile save opens Nearby without missing game columns',async()=>{
+ const {call,sql}=await fixture({legacy:true});
+ sql.prepare('INSERT INTO decks(id,user_id,name,lend) VALUES(?,?,?,?)').run('old-deck','me','Annie',0);
+ const profile=await call('profile','PUT',{username:'Alex',area_id:'sg-pa-bedok',style:'casual',share_condo:false});
+ assert.equal(profile.status,200);
+ assert.equal((await call('nearby')).status,200);assert.equal((await call('games')).status,200);
+ assert.equal((await call('my-games')).status,200);
+ assert.equal((await call('me')).data.decks[0].name,'Annie');
+ const game=await call('games','POST',{title:'A game',date:singaporeDate(),slot:'evening',venue:'decide',deck_need:'own',extra_decks:false});assert.equal(game.status,201);
+ const cols=sql.prepare('PRAGMA table_info(games)').all().map(c=>c.name);assert.ok(cols.includes('deck_need'));assert.ok(cols.includes('extra_decks'));
+});
+
+test('profile and Legend decks save together; default and custom names persist without data loss',async()=>{
+ const {call,sql}=await fixture();const annie=legends.find(l=>l.champion==='Annie');
+ const body={username:'Alex',area_id:'sg-pa-bedok',style:'learning',share_condo:false,decks:[{legend_id:annie.id,custom_name:''}]};
+ assert.equal((await call('profile','PUT',body)).status,200);
+ let deck=(await call('me')).data.decks[0];assert.equal(deck.legend_id,annie.id);assert.equal(deck.name,`${annie.champion} · ${annie.title}`);assert.equal(deck.custom_name,'');
+ assert.equal((await call('profile','PUT',{...body,decks:[{legend_id:annie.id,custom_name:' My fiery deck '}]})).status,200);
+ deck=(await call('me')).data.decks[0];assert.equal(deck.name,'My fiery deck');assert.equal(deck.custom_name,'My fiery deck');
+ assert.equal((await call('profile','PUT',{...body,username:'Must not save',decks:[{legend_id:'unknown',custom_name:''}]})).status,400);
+ assert.equal((await call('me')).data.user.username,'Alex');assert.equal((await call('me')).data.decks[0].name,'My fiery deck');
+ // Force a failure after profile statements; D1's transaction must roll back all changes.
+ sql.exec("CREATE TRIGGER reject_deck BEFORE INSERT ON decks BEGIN SELECT RAISE(ABORT,'test failure'); END;");
+ assert.equal((await call('profile','PUT',{...body,username:'Rolled back'})).status,500);
+ assert.equal((await call('me')).data.user.username,'Alex');assert.equal((await call('me')).data.decks[0].name,'My fiery deck');
+});
 
 test('Google login reports missing setup and validates callback state before contacting Google',async()=>{
  const {env}=await fixture();
