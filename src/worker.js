@@ -8,25 +8,34 @@ export default {async scheduled(event,env){if(env.DB)await env.DB.batch([env.DB.
 async function handle(req,env){
  const url=new URL(req.url),p=url.pathname;
  if(!p.startsWith('/api/')&&!p.startsWith('/auth/'))return env.ASSETS.fetch(req);
+ const configured=Boolean(env.DB&&env.GOOGLE_CLIENT_ID&&env.GOOGLE_CLIENT_SECRET&&((env.PILOT_GOOGLE_SUBS||'').trim()||(env.PILOT_EMAILS||'').trim()));
+ if(p==='/api/status'&&req.method==='GET')return json({loginAvailable:configured});
+ const authFailure=reason=>new Response(null,{status:302,headers:{location:'/?signin='+reason,'set-cookie':cookie('oauth_state','',0),'cache-control':'no-store'}});
+ if(p.startsWith('/auth/')&&req.method!=='GET')return json({error:'Method not allowed'},405,{Allow:'GET'});
+ if(p.startsWith('/auth/')&&!configured)return authFailure('setup');
  if(!env.DB||!env.GOOGLE_CLIENT_ID||!env.GOOGLE_CLIENT_SECRET)return json({error:'Live community is not configured yet. Explore the demo instead.',setupRequired:true},503);
  const origin=env.APP_ORIGIN;
  if(!origin||new URL(origin).origin!==origin)return json({error:'Invalid deployment origin'},503);
  if(!['GET','HEAD'].includes(req.method)&&req.headers.get('Origin')!==origin)return json({error:'Invalid origin'},403);
  if(p==='/auth/google'){
   const state=crypto.randomUUID(),u=new URL('https://accounts.google.com/o/oauth2/v2/auth');
-  u.search=new URLSearchParams({client_id:env.GOOGLE_CLIENT_ID,redirect_uri:origin+'/auth/callback',response_type:'code',scope:'openid',state}).toString();
+  u.search=new URLSearchParams({client_id:env.GOOGLE_CLIENT_ID,redirect_uri:origin+'/auth/callback',response_type:'code',scope:'openid email',state}).toString();
   return new Response(null,{status:302,headers:{location:u.toString(),'set-cookie':cookie('oauth_state',state,600),'cache-control':'no-store'}});
  }
  if(p==='/auth/callback'){
-  if(!url.searchParams.get('state')||url.searchParams.get('state')!==cookies(req).oauth_state)return json({error:'Sign-in expired. Try again.'},400);
+  if(!url.searchParams.get('state')||url.searchParams.get('state')!==cookies(req).oauth_state)return authFailure('expired');
+  if(url.searchParams.has('error'))return authFailure('cancelled');
+  if(!url.searchParams.get('code'))return authFailure('failed');
   const t=await fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({code:url.searchParams.get('code')||'',client_id:env.GOOGLE_CLIENT_ID,client_secret:env.GOOGLE_CLIENT_SECRET,redirect_uri:origin+'/auth/callback',grant_type:'authorization_code'})});
-  const token=await t.json();if(!t.ok||!token.access_token)return json({error:'Google sign-in failed'},401);
-  const g=await fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{Authorization:'Bearer '+token.access_token}});const identity=await g.json();if(!g.ok||!identity.sub)return json({error:'Google identity unavailable'},401);
-  if(!(env.PILOT_GOOGLE_SUBS||'').split(',').map(x=>x.trim()).includes(identity.sub))return json({error:'This is an invite-only pilot. Ask the organiser for access.'},403);
-  let user=await env.DB.prepare('SELECT id FROM users WHERE google_sub=?').bind(identity.sub).first();
-  if(!user){user={id:crypto.randomUUID()};await env.DB.prepare('INSERT INTO users(id,google_sub,username,created_at) VALUES(?,?,?,?)').bind(user.id,identity.sub,'New neighbour',now()).run()}
+  const token=await t.json();if(!t.ok||!token.access_token)return authFailure('failed');
+  const g=await fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{Authorization:'Bearer '+token.access_token}});const identity=await g.json();if(!g.ok||typeof identity.sub!=='string'||!identity.sub)return authFailure('failed');
+  const invitedSubject=(env.PILOT_GOOGLE_SUBS||'').split(',').map(x=>x.trim()).filter(Boolean).includes(identity.sub);
+  const invitedEmail=identity.email_verified===true&&typeof identity.email==='string'&&(env.PILOT_EMAILS||'').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean).includes(identity.email.trim().toLowerCase());
+  if(!invitedSubject&&!invitedEmail)return authFailure('invite');
+  await env.DB.prepare('INSERT INTO users(id,google_sub,username,created_at) VALUES(?,?,?,?) ON CONFLICT(google_sub) DO NOTHING').bind(crypto.randomUUID(),identity.sub,'New neighbour',now()).run();
+  const user=await env.DB.prepare('SELECT id,area_id FROM users WHERE google_sub=?').bind(identity.sub).first();
   const session=crypto.randomUUID()+crypto.randomUUID();await env.DB.prepare('INSERT INTO sessions VALUES(?,?,?)').bind(await hash(session),user.id,now()+86400*14).run();
-  const headers=new Headers({location:origin+'/?welcome=1','cache-control':'no-store'});headers.append('set-cookie',cookie('rn_session',session,86400*14));headers.append('set-cookie',cookie('oauth_state','',0));return new Response(null,{status:302,headers});
+  const headers=new Headers({location:origin+(user.area_id?'/#nearby':'/?welcome=1#profile'),'cache-control':'no-store'});headers.append('set-cookie',cookie('rn_session',session,86400*14));headers.append('set-cookie',cookie('oauth_state','',0));return new Response(null,{status:302,headers});
  }
  const user=await env.DB.prepare('SELECT u.id,u.username,u.area_id,u.style,u.share_condo FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=? AND s.expires_at>?').bind(await hash(cookies(req).rn_session||''),now()).first();
  if(!user)return json({error:'Please sign in'},401);

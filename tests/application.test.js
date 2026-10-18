@@ -14,6 +14,71 @@ async function fixture(){const sql=new DatabaseSync(':memory:');sql.exec(readFil
  return {sql,call,env};}
 test('Singapore date rolls over independently of UTC',()=>{assert.equal(singaporeDate(new Date('2026-10-16T16:01:00Z')),'2026-10-17');assert.equal(singaporeDay('2026-10-17'),6);assert.equal(validDate('2026-02-30'),false);assert.equal(preferencesValid([{day:7,slot:'evening'}]),false);assert.equal(preferencesValid([{day:1,slot:'evening'},{day:1,slot:'evening'}]),false)});
 test('authentication and cross-origin writes fail closed',async()=>{const {call}=await fixture();assert.equal((await call('me','GET',null,'invalid')).status,401);assert.equal((await call('tonight','PUT',{slot:'evening',available:true},'me','https://evil.test')).status,403)});
+
+test('Google login reports missing setup and validates callback state before contacting Google',async()=>{
+ const {env}=await fixture();
+ const request=(path,headers={})=>worker.fetch(new Request('https://example.test'+path,{headers}),env);
+ assert.deepEqual(await (await request('/api/status')).json(),{loginAvailable:false});
+ assert.equal((await request('/auth/google')).headers.get('location'),'/?signin=setup');
+ env.PILOT_GOOGLE_SUBS='invited';
+ const start=await request('/auth/google');
+ const destination=new URL(start.headers.get('location'));
+ assert.equal(destination.origin,'https://accounts.google.com');
+ assert.equal(destination.searchParams.get('redirect_uri'),'https://example.test/auth/callback');
+ assert.equal(destination.searchParams.get('scope'),'openid email');
+ assert.match(start.headers.get('set-cookie'),/HttpOnly; SameSite=Lax/);
+ assert.equal((await request('/auth/callback?state=wrong&code=test',{Cookie:'oauth_state=expected'})).headers.get('location'),'/?signin=expired');
+ assert.equal((await request('/auth/callback?state=expected&error=access_denied',{Cookie:'oauth_state=expected'})).headers.get('location'),'/?signin=cancelled');
+});
+
+test('Google login persists one account, restores its profile, and issues revocable hashed sessions',async t=>{
+ const {sql,env}=await fixture();env.PILOT_GOOGLE_SUBS='invited';
+ t.mock.method(globalThis,'fetch',async url=>Response.json(String(url).includes('/token')?{access_token:'google-token'}:{sub:'invited'}));
+ const signIn=()=>worker.fetch(new Request('https://example.test/auth/callback?state=expected&code=test',{headers:{Cookie:'oauth_state=expected'}}),env);
+ const first=await signIn();assert.equal(first.headers.get('location'),'https://example.test/?welcome=1#profile');
+ const sessionCookie=first.headers.getSetCookie().find(x=>x.startsWith('rn_session=')).split(';')[0];
+ const rawToken=sessionCookie.slice('rn_session='.length);
+ assert.equal(sql.prepare('SELECT count(*) n FROM sessions WHERE token_hash=?').get(rawToken).n,0);
+ assert.equal(sql.prepare('SELECT count(*) n FROM sessions WHERE token_hash=?').get(await digest(rawToken)).n,1);
+ const call=(path,method='GET',body)=>worker.fetch(new Request('https://example.test/api/'+path,{method,headers:{Cookie:sessionCookie,Origin:env.APP_ORIGIN},body:body?JSON.stringify(body):undefined}),env);
+ assert.equal((await call('profile','PUT',{username:'Neighbour',area_id:'b',style:'learning',share_condo:true})).status,200);
+ const second=await signIn();assert.equal(second.headers.get('location'),'https://example.test/#nearby');
+ assert.equal(sql.prepare('SELECT count(*) n FROM users WHERE google_sub=?').get('invited').n,1);
+ const restored=await (await call('me')).json();assert.equal(restored.user.username,'Neighbour');assert.equal(restored.user.area_id,'b');
+ assert.equal(restored.user.google_sub,undefined);
+ await call('logout','POST');assert.equal((await call('me')).status,401);
+});
+
+test('Google identities outside the pilot and failed token exchanges never create accounts',async t=>{
+ const {sql,env}=await fixture();env.PILOT_GOOGLE_SUBS='invited';
+ const mock=t.mock.method(globalThis,'fetch',async url=>Response.json(String(url).includes('/token')?{access_token:'google-token'}:{sub:'uninvited'}));
+ const signIn=()=>worker.fetch(new Request('https://example.test/auth/callback?state=expected&code=test',{headers:{Cookie:'oauth_state=expected'}}),env);
+ assert.equal((await signIn()).headers.get('location'),'/?signin=invite');
+ assert.equal(sql.prepare('SELECT count(*) n FROM users').get().n,4);
+ mock.mock.mockImplementation(async()=>Response.json({error:'invalid_grant'},{status:400}));
+ assert.equal((await signIn()).headers.get('location'),'/?signin=failed');
+ assert.equal(sql.prepare('SELECT count(*) n FROM sessions').get().n,4);
+});
+
+test('email invitations require a Google-verified exact email and keep accounts keyed by subject',async t=>{
+ const {sql,env}=await fixture();env.PILOT_EMAILS=' invited@example.test ';
+ let identity={sub:'email-invited',email:'Invited@Example.Test',email_verified:true};
+ t.mock.method(globalThis,'fetch',async url=>Response.json(String(url).includes('/token')?{access_token:'google-token'}:identity));
+ const signIn=()=>worker.fetch(new Request('https://example.test/auth/callback?state=expected&code=test',{headers:{Cookie:'oauth_state=expected'}}),env);
+ const status=await worker.fetch(new Request('https://example.test/api/status'),env);
+ assert.equal((await status.json()).loginAvailable,true);
+ for(const denied of [
+  {sub:'denied',email:'invited@example.test',email_verified:false},
+  {sub:'denied',email:'invited@example.test',email_verified:'true'},
+  {sub:'denied',email:'someone@example.test',email_verified:true},
+  {sub:'denied',email:'invited@example.test.evil.test',email_verified:true},
+  {sub:'denied',email_verified:true}
+ ]){identity=denied;assert.equal((await signIn()).headers.get('location'),'/?signin=invite')}
+ assert.equal(sql.prepare('SELECT count(*) n FROM users').get().n,4);
+ identity={sub:'email-invited',email:'Invited@Example.Test',email_verified:true};
+ assert.equal((await signIn()).headers.get('location'),'https://example.test/?welcome=1#profile');
+ await signIn();assert.equal(sql.prepare('SELECT count(*) n FROM users WHERE google_sub=?').get('email-invited').n,1);
+});
 test('confirmation is explicit, expires by Singapore date, and counts protect small groups',async()=>{const {sql,call}=await fixture();const date=singaporeDate();sql.prepare('INSERT INTO confirmations VALUES(?,?,?)').run('other',date,'evening');sql.prepare('INSERT INTO confirmations VALUES(?,?,?)').run('third','2020-01-01','evening');let r=await call('nearby');assert.equal(r.data.counts.find(x=>x.slot==='evening').confirmed,'1–2');assert.ok(!JSON.stringify(r.data).includes('secret-name'));await call('tonight','PUT',{slot:'evening',available:true});assert.equal((await call('me')).data.confirmations.length,1);assert.equal((await call('nearby')).data.counts.find(x=>x.slot==='evening').confirmed,'1–2');await call('tonight','PUT',{slot:'evening',available:false});assert.equal((await call('me')).data.confirmations.length,0)});
 test('preferences are atomic and invalid duplicates rejected',async()=>{const {call}=await fixture();assert.equal((await call('preferences','PUT',{preferences:[{day:2,slot:'late'}]})).status,200);assert.equal((await call('preferences','PUT',{preferences:[{day:1,slot:'late'},{day:1,slot:'late'}]})).status,400);assert.deepEqual((await call('me')).data.preferences,[{day:2,slot:'late'}])});
 test('game starts without a venue; only accepted participants read messages and exact instructions',async()=>{const {call}=await fixture();const created=await call('games','POST',{title:'Relaxed games',date:singaporeDate(),slot:'evening',venue:'decide',deck_need:'own',extra_decks:true});assert.equal(created.status,201);const id=created.data.id;await call('games/'+id+'/venue','PUT',{details:'Private meeting point'});await call('games/'+id+'/join','POST',{deck_need:'need',extra_decks:false},'other');assert.equal((await call('games/'+id+'/messages','GET',null,'other')).status,403);const pending=await call('games/'+id+'/requests');await call('games/'+id+'/requests','PUT',{id:pending.data.requests[0].id,status:'accepted'});assert.equal((await call('games/'+id+'/messages','GET',null,'other')).data.details,'Private meeting point');const publicGames=JSON.stringify((await call('games','GET',null,'third')).data);assert.ok(!publicGames.includes('Private meeting point'));assert.ok(!publicGames.includes('secret-name'));assert.equal((await call('games/'+id+'/messages','POST',{body:'Hello'},'third')).status,403);assert.equal((await call('games/'+id+'/requests','PUT',{id:pending.data.requests[0].id,status:'accepted'},'third')).status,403);assert.equal((await call('games/'+id+'/join','POST',{deck_need:'need',extra_decks:false},'far')).status,400)});

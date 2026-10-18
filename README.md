@@ -66,12 +66,12 @@ Use `npx wrangler d1 execute riftneighbours --local --command "..."` for local d
 
 ```sh
 npx wrangler secret put GOOGLE_CLIENT_SECRET
-npx wrangler secret put PILOT_GOOGLE_SUBS
+npx wrangler secret put PILOT_EMAILS
 ```
 
-`PILOT_GOOGLE_SUBS` is a comma-separated allowlist of the invited users' Google OpenID subject identifiers. Obtain these through a controlled onboarding process; never accept a subject supplied as proof of identity. Without an allowlist, Google login does not admit anyone. This keeps the unfinished pilot closed. Replace with a proper invitation flow before scaling.
+`PILOT_EMAILS` is a comma-separated list of invited email addresses, configured as a Worker secret. Login requires a matching email returned by Google with `email_verified: true`. Addresses are compared case-insensitively. The existing `PILOT_GOOGLE_SUBS` allowlist remains supported. Without either allowlist, login admits nobody. Accounts remain keyed by Google subject; email is used for admission and is not stored in user profiles.
 
-For local auth, put the two secrets in ignored `.dev.vars`. Keep credentials out of git. The app requests only `openid`; it does not need a member's Google name, photo or email. OAuth uses a short-lived state cookie; app sessions expire after 14 days. HTTPS is required outside localhost.
+For local auth, put the two secrets in ignored `.dev.vars`. Keep credentials out of git. The app requests `openid email` for invitation checks; it does not request a name or photo. OAuth uses a short-lived state cookie; app sessions expire after 14 days. HTTPS is required outside localhost.
 
 ```sh
 npm run deploy
