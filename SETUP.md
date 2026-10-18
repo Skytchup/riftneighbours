@@ -28,3 +28,7 @@ The application already stores accounts, profiles, availability, decks and games
 Register `http://localhost:8787/auth/callback` as an additional Google redirect URI. Override `APP_ORIGIN` with `http://localhost:8787` in ignored `.dev.vars`, alongside `GOOGLE_CLIENT_SECRET` and `PILOT_EMAILS`. Use `npm run db:local` to apply migrations to local D1; this does not populate the production database.
 
 Automated tests mock Google's responses and run the real Worker against SQLite. A real Google/D1 sign-in still needs the external setup above.
+
+## OneMap connection
+
+Register and verify a OneMap API account at https://www.onemap.gov.sg/apidocs/register. Add Worker runtime Secrets named `ONEMAP_EMAIL` and `ONEMAP_PASSWORD`, save/deploy, and wait for the GitHub code build. These credentials authenticate server-side and renew provider tokens on demand. In Profile, choose a planning area, search a development or postal code, select its building and save. Sign out/in and confirm the chosen location persists. If credentials or OneMap are unavailable, the inline error preserves the form and manual entry remains available.

@@ -1,5 +1,13 @@
 import { SLOTS, singaporeDate, singaporeDay, validDate, preferencesValid, text, deckPreferencesValid } from './domain.js';
 import { planningAreas, locationChoices } from './areas.js';
+import { oneMap, LocationError } from './onemap.js';
+const locationLimits=new Map();
+function allowLocationSearch(uid){
+ const time=Date.now(),entry=locationLimits.get(uid);
+ if(entry&&entry.until>time){if(entry.count>=30)return false;entry.count++;return true}
+ if(locationLimits.size>=1000)locationLimits.delete(locationLimits.keys().next().value);
+ locationLimits.set(uid,{count:1,until:time+60000});return true;
+}
 const json=(v,s=200,h={})=>new Response(JSON.stringify(v),{status:s,headers:{'content-type':'application/json','cache-control':'no-store',...h}});
 const now=()=>Math.floor(Date.now()/1000);
 const cookie=(name,value,max)=>`${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${max}; Secure`;
@@ -43,6 +51,13 @@ async function handle(req,env){
  const db=env.DB,uid=user.id;
  if(p==='/api/logout'&&req.method==='POST'){await db.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await hash(cookies(req).rn_session||'')).run();return json({ok:true},200,{'set-cookie':cookie('rn_session','',0)})}
  const read=async()=>{if(Number(req.headers.get('content-length'))>12000)throw Error('body too large');const raw=await req.text();if(raw.length>12000)throw Error('body too large');return JSON.parse(raw)};
+ if(p==='/api/locations'&&req.method==='GET'){
+  const query=url.searchParams.get('q')||'';
+  if(!text(query,100)||query.trim().length<3)return json({error:'Enter 3–100 characters of a condo name or postal code.'},400);
+  if(!allowLocationSearch(uid))return json({error:'Please wait a minute before searching again.'},429);
+  try{return json({results:await oneMap(env).search(query),source:'OneMap / Singapore Land Authority'})}
+  catch(error){if(error instanceof LocationError)return json({error:error.message},503);throw error}
+ }
  if(p==='/api/me'&&req.method==='GET')return json({user,preferences:(await db.prepare('SELECT day,slot FROM preferences WHERE user_id=?').bind(uid).all()).results,decks:(await db.prepare('SELECT id,name FROM decks WHERE user_id=?').bind(uid).all()).results,confirmations:(await db.prepare('SELECT date,slot FROM confirmations WHERE user_id=? AND date>=?').bind(uid,singaporeDate()).all()).results,areas:locationChoices((await db.prepare('SELECT * FROM areas ORDER BY neighbourhood,name').all()).results)});
  if(p==='/api/profile'&&req.method==='PUT'){
   const b=await read();
@@ -50,7 +65,17 @@ async function handle(req,env){
   const planning=planningAreas.find(a=>a.id===b.area_id);
   let selected=planning||await db.prepare('SELECT * FROM areas WHERE id=?').bind(b.area_id).first();
   if(!selected)return json({error:'Choose a location from the list'},400);
-  const condo=(b.condo_name||'').normalize('NFKC').trim().replace(/\s+/g,' ');
+  let condo=(b.condo_name||'').normalize('NFKC').trim().replace(/\s+/g,' ');
+  if(b.onemap_selection!==undefined){
+   const choice=b.onemap_selection;
+   if(!planning||!choice||!text(choice.query,100)||!text(choice.id,24))return json({error:'Choose a neighbourhood and search result again.'},400);
+   if(!allowLocationSearch(uid))return json({error:'Please wait a minute before saving this search result.'},429);
+   try{
+    const result=(await oneMap(env).search(choice.query)).find(a=>a.id===choice.id);
+    if(!result)return json({error:'That location is no longer in the search results. Please search again.'},400);
+    condo=result.name;
+   }catch(error){if(error instanceof LocationError)return json({error:error.message},503);throw error}
+  }
   if(condo&&!planning)return json({error:'Choose a neighbourhood before adding your condo'},400);
   if(condo)selected={id:'sg-condo-'+(await hash(planning.id+'|'+condo.toLowerCase())).slice(0,24),name:condo,neighbourhood:planning.name};
   const share=b.share_condo===true&&!selected.id.startsWith('sg-pa-')?1:0;

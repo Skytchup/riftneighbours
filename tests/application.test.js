@@ -116,6 +116,25 @@ test('self-declared condos persist, normalize within a planning area and support
  const invalid=await call('profile','PUT',{...body,condo_name:'x'.repeat(101)});assert.equal(invalid.status,400);
  assert.equal((await call('me')).data.user.area_id,id);
 });
+
+test('OneMap search requires a session and saves only a server-validated building selection',async t=>{
+ const {env,call}=await fixture();env.ONEMAP_EMAIL='operator@example.test';env.ONEMAP_PASSWORD='private';
+ let calls=0;
+ t.mock.method(globalThis,'fetch',async url=>{
+  calls++;
+  return Response.json(String(url).includes('/getToken')?{access_token:'private-token',expiry_timestamp:Math.floor(Date.now()/1000)+3600}:{results:[{BUILDING:'EXAMPLE GARDENS',ADDRESS:'1 EXAMPLE ROAD',POSTAL:'123456'}]});
+ });
+ assert.equal((await call('locations?q=garden','GET',null,'invalid')).status,401);assert.equal(calls,0);
+ assert.equal((await call('locations?q=ab')).status,400);
+ const found=await call('locations?q=garden');assert.equal(found.status,200);assert.equal(found.data.results.length,1);
+ assert.ok(!JSON.stringify(found.data).includes('private'));
+ const selected=found.data.results[0];
+ const body={username:'Alex',area_id:'sg-pa-bedok',style:'casual',share_condo:true,condo_name:'Forged client name',onemap_selection:{query:'garden',id:selected.id}};
+ const saved=await call('profile','PUT',body);assert.equal(saved.status,200);assert.equal(saved.data.area.name,'EXAMPLE GARDENS');
+ assert.equal((await call('me')).data.user.area_id,saved.data.area.id);
+ assert.equal((await call('profile','PUT',{...body,onemap_selection:{query:'garden',id:'forged'}})).status,400);
+ assert.equal((await call('me')).data.user.area_id,saved.data.area.id);
+});
 test('game starts without a venue; only accepted participants read messages and exact instructions',async()=>{const {call}=await fixture();const created=await call('games','POST',{title:'Relaxed games',date:singaporeDate(),slot:'evening',venue:'decide',deck_need:'own',extra_decks:true});assert.equal(created.status,201);const id=created.data.id;await call('games/'+id+'/venue','PUT',{details:'Private meeting point'});await call('games/'+id+'/join','POST',{deck_need:'need',extra_decks:false},'other');assert.equal((await call('games/'+id+'/messages','GET',null,'other')).status,403);const pending=await call('games/'+id+'/requests');await call('games/'+id+'/requests','PUT',{id:pending.data.requests[0].id,status:'accepted'});assert.equal((await call('games/'+id+'/messages','GET',null,'other')).data.details,'Private meeting point');const publicGames=JSON.stringify((await call('games','GET',null,'third')).data);assert.ok(!publicGames.includes('Private meeting point'));assert.ok(!publicGames.includes('secret-name'));assert.equal((await call('games/'+id+'/messages','POST',{body:'Hello'},'third')).status,403);assert.equal((await call('games/'+id+'/requests','PUT',{id:pending.data.requests[0].id,status:'accepted'},'third')).status,403);assert.equal((await call('games/'+id+'/join','POST',{deck_need:'need',extra_decks:false},'far')).status,400)});
 test('blocking prevents game access and account deletion cascades',async()=>{const {sql,call}=await fixture();const id=(await call('games','POST',{title:'Hi',date:singaporeDate(),slot:'late',venue:'decide',deck_need:'own',extra_decks:true})).data.id;await call('blocks','POST',{user_id:'other'});assert.equal((await call('games/'+id+'/join','POST',{deck_need:'need',extra_decks:false},'other')).status,404);await call('account','DELETE');assert.equal(sql.prepare('SELECT count(*) n FROM users WHERE id=?').get('me').n,0);assert.equal(sql.prepare('SELECT count(*) n FROM games').get().n,0);assert.equal((await call('me')).status,401)});
 
