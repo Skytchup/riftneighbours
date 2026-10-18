@@ -4,6 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
 import worker from '../src/worker.js';
 import {singaporeDate,singaporeDay,preferencesValid,validDate} from '../src/domain.js';
+import {planningAreas} from '../src/areas.js';
 const digest=async s=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))).map(x=>x.toString(16).padStart(2,'0')).join('');
 async function fixture(){const sql=new DatabaseSync(':memory:');sql.exec(readFileSync(new URL('../migrations/0001_initial.sql',import.meta.url),'utf8'));sql.exec(readFileSync(new URL('../migrations/0002_game_deck_preferences.sql',import.meta.url),'utf8'));
  const DB={prepare(query){return {args:[],bind(...args){this.args=args;return this},async first(){return sql.prepare(query).get(...this.args)||null},async all(){return {results:sql.prepare(query).all(...this.args)}},async run(){return sql.prepare(query).run(...this.args)}}},async batch(items){sql.exec('BEGIN');try{const results=[];for(const i of items)results.push(await i.run());sql.exec('COMMIT');return results}catch(e){sql.exec('ROLLBACK');throw e}}};
@@ -81,6 +82,40 @@ test('email invitations require a Google-verified exact email and keep accounts 
 });
 test('confirmation is explicit, expires by Singapore date, and counts protect small groups',async()=>{const {sql,call}=await fixture();const date=singaporeDate();sql.prepare('INSERT INTO confirmations VALUES(?,?,?)').run('other',date,'evening');sql.prepare('INSERT INTO confirmations VALUES(?,?,?)').run('third','2020-01-01','evening');let r=await call('nearby');assert.equal(r.data.counts.find(x=>x.slot==='evening').confirmed,'1–2');assert.ok(!JSON.stringify(r.data).includes('secret-name'));await call('tonight','PUT',{slot:'evening',available:true});assert.equal((await call('me')).data.confirmations.length,1);assert.equal((await call('nearby')).data.counts.find(x=>x.slot==='evening').confirmed,'1–2');await call('tonight','PUT',{slot:'evening',available:false});assert.equal((await call('me')).data.confirmations.length,0)});
 test('preferences are atomic and invalid duplicates rejected',async()=>{const {call}=await fixture();assert.equal((await call('preferences','PUT',{preferences:[{day:2,slot:'late'}]})).status,200);assert.equal((await call('preferences','PUT',{preferences:[{day:1,slot:'late'},{day:1,slot:'late'}]})).status,400);assert.deepEqual((await call('me')).data.preferences,[{day:2,slot:'late'}])});
+
+test('empty catalogues offer all 55 planning areas and neighbourhood-only profiles save without condo sharing',async()=>{
+ const {sql,call}=await fixture();sql.exec('DELETE FROM areas');
+ const choices=(await call('me')).data.areas;
+ assert.equal(choices.length,55);assert.equal(new Set(choices.map(a=>a.id)).size,55);
+ assert.equal(planningAreas.length,55);
+ const body={username:'Alex',style:'casual',area_id:'sg-pa-bedok',share_condo:true};
+ assert.equal((await call('profile','PUT',body)).status,200);
+ const restored=(await call('me')).data;
+ assert.equal(restored.user.area_id,'sg-pa-bedok');assert.equal(restored.user.share_condo,0);
+ assert.equal(restored.areas.filter(a=>a.id==='sg-pa-bedok').length,1);
+ assert.equal((await call('nearby')).status,200);
+ assert.equal((await call('nearby?scope=condo')).status,403);
+ assert.equal((await call('profile','PUT',{...body,area_id:'sg-pa-fake'})).status,400);
+});
+
+test('self-declared condos persist, normalize within a planning area and support neighbourhood discovery',async()=>{
+ const {sql,call}=await fixture();
+ const body={username:'Alex',style:'learning',area_id:'sg-pa-bedok',condo_name:' Example   Gardens ',share_condo:true};
+ const saved=await call('profile','PUT',body);assert.equal(saved.status,200);
+ assert.equal(saved.data.area.name,'Example Gardens');assert.equal(saved.data.area.neighbourhood,'Bedok');
+ const id=saved.data.area.id;
+ assert.equal((await call('profile','PUT',{...body,condo_name:'EXAMPLE GARDENS'},'other')).data.area.id,id);
+ assert.equal(sql.prepare('SELECT count(*) n FROM areas WHERE id=?').get(id).n,1);
+ const restored=(await call('me')).data;
+ assert.equal(restored.user.area_id,id);assert.equal(restored.user.share_condo,1);
+ assert.ok(restored.areas.some(a=>a.id===id&&a.kind==='condo'));
+ await call('tonight','PUT',{slot:'evening',available:true},'other');
+ assert.equal((await call('nearby')).data.counts.find(c=>c.slot==='evening').confirmed,'1–2');
+ assert.equal((await call('nearby?scope=condo')).data.counts.find(c=>c.slot==='evening').confirmed,'1–2');
+ assert.notEqual((await call('profile','PUT',{...body,area_id:'sg-pa-tampines'},'third')).data.area.id,id);
+ const invalid=await call('profile','PUT',{...body,condo_name:'x'.repeat(101)});assert.equal(invalid.status,400);
+ assert.equal((await call('me')).data.user.area_id,id);
+});
 test('game starts without a venue; only accepted participants read messages and exact instructions',async()=>{const {call}=await fixture();const created=await call('games','POST',{title:'Relaxed games',date:singaporeDate(),slot:'evening',venue:'decide',deck_need:'own',extra_decks:true});assert.equal(created.status,201);const id=created.data.id;await call('games/'+id+'/venue','PUT',{details:'Private meeting point'});await call('games/'+id+'/join','POST',{deck_need:'need',extra_decks:false},'other');assert.equal((await call('games/'+id+'/messages','GET',null,'other')).status,403);const pending=await call('games/'+id+'/requests');await call('games/'+id+'/requests','PUT',{id:pending.data.requests[0].id,status:'accepted'});assert.equal((await call('games/'+id+'/messages','GET',null,'other')).data.details,'Private meeting point');const publicGames=JSON.stringify((await call('games','GET',null,'third')).data);assert.ok(!publicGames.includes('Private meeting point'));assert.ok(!publicGames.includes('secret-name'));assert.equal((await call('games/'+id+'/messages','POST',{body:'Hello'},'third')).status,403);assert.equal((await call('games/'+id+'/requests','PUT',{id:pending.data.requests[0].id,status:'accepted'},'third')).status,403);assert.equal((await call('games/'+id+'/join','POST',{deck_need:'need',extra_decks:false},'far')).status,400)});
 test('blocking prevents game access and account deletion cascades',async()=>{const {sql,call}=await fixture();const id=(await call('games','POST',{title:'Hi',date:singaporeDate(),slot:'late',venue:'decide',deck_need:'own',extra_decks:true})).data.id;await call('blocks','POST',{user_id:'other'});assert.equal((await call('games/'+id+'/join','POST',{deck_need:'need',extra_decks:false},'other')).status,404);await call('account','DELETE');assert.equal(sql.prepare('SELECT count(*) n FROM users WHERE id=?').get('me').n,0);assert.equal(sql.prepare('SELECT count(*) n FROM games').get().n,0);assert.equal((await call('me')).status,401)});
 

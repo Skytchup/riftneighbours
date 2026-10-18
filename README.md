@@ -139,3 +139,7 @@ npx wrangler d1 execute riftneighbours --remote --file ura-areas.sql
 ```
 
 This adds/updates stable project IDs; it never removes existing locations or reassigns users. Only project name, street-derived stable ID and district grouping are used, not prices, tenants or unit addresses. No catalogue has been fetched/imported without the operator's URA key. The demo still uses clearly fictional locations.
+
+## Location onboarding
+
+Profile setup always offers Singapore's 55 planning areas from SLA OneMap planning-area names (https://www.onemap.gov.sg/apidocs/planningarea). A neighbourhood-only profile can be saved without seeding D1. Members may optionally add a self-declared condo or estate name within a planning area; normalized names reuse stable IDs within that area. Condo sharing requires a condo, while neighbourhood-only profiles contribute to neighbourhood counts. Planning areas are coarse groups, not distance matching. The stored catalogue is not an exhaustive condo register; OneMap building search requires API registration and is not connected yet. Existing URA/curated locations remain available. No database migration is needed for this onboarding change.
