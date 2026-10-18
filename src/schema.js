@@ -2,6 +2,8 @@
 // databases initialized through Wrangler migrations. Additive and retry-safe.
 const ready=new WeakMap();
 const additions={
+ users:{available_until:'INTEGER NOT NULL DEFAULT 0',share_map:'INTEGER NOT NULL DEFAULT 0 CHECK(share_map IN (0,1))'},
+ areas:{latitude:'REAL',longitude:'REAL',address:"TEXT NOT NULL DEFAULT ''",postal:"TEXT NOT NULL DEFAULT ''",geo_attempted_at:'INTEGER NOT NULL DEFAULT 0'},
  games:{deck_need:"TEXT NOT NULL DEFAULT 'own' CHECK(deck_need IN ('own','need'))",extra_decks:'INTEGER NOT NULL DEFAULT 0 CHECK(extra_decks IN (0,1))'},
  requests:{deck_need:"TEXT NOT NULL DEFAULT 'own' CHECK(deck_need IN ('own','need'))",extra_decks:'INTEGER NOT NULL DEFAULT 0 CHECK(extra_decks IN (0,1))'},
  decks:{legend_id:'TEXT',custom_name:"TEXT NOT NULL DEFAULT ''"}

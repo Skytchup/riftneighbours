@@ -1,4 +1,8 @@
 export const SLOTS = ['afternoon', 'evening', 'late'];
+export function singaporeSlot(date=new Date()){
+ const hour=Number(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Singapore',hour:'2-digit',hourCycle:'h23'}).format(date));
+ return hour>=21?'late':hour>=18?'evening':hour>=14?'afternoon':null;
+}
 export function singaporeDate(now = new Date()) { return new Intl.DateTimeFormat('en-CA', {timeZone:'Asia/Singapore',year:'numeric',month:'2-digit',day:'2-digit'}).format(now); }
 export function singaporeDay(date) { return new Date(date+'T12:00:00+08:00').getUTCDay(); }
 export function validDate(value) { return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && !isNaN(Date.parse(value)) && new Date(value+'T00:00:00Z').toISOString().slice(0,10)===value; }

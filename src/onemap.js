@@ -27,7 +27,7 @@ export function oneMap(env) {
   if(cached&&cached.expires>Date.now())return cached.results;
   try{
    const url=new URL('https://www.onemap.gov.sg/api/common/elastic/search');
-   url.search=new URLSearchParams({searchVal:q,returnGeom:'N',getAddrDetails:'Y',pageNum:'1'});
+   url.search=new URLSearchParams({searchVal:q,returnGeom:'Y',getAddrDetails:'Y',pageNum:'1'});
    let response;
    for(let attempt=0;attempt<2;attempt++){
     const value=await authenticate();
@@ -45,7 +45,9 @@ export function oneMap(env) {
     // entries into purported residential developments.
     if(!name||['NIL','NA','N/A'].includes(name.toUpperCase())||name.length>100||!address||address.length>300)continue;
     const id=(await digest(name.toUpperCase()+'|'+address.toUpperCase())).slice(0,24);
-    if(seen.has(id))continue;seen.add(id);results.push({id,name,address,postal});
+    const latitude=Number(row.LATITUDE),longitude=Number(row.LONGITUDE);
+    const geometry=latitude>=1.1&&latitude<=1.5&&longitude>=103.5&&longitude<=104.5?{latitude,longitude}:{};
+    if(seen.has(id))continue;seen.add(id);results.push({id,name,address,postal,...geometry});
     if(results.length===20)break;
    }
    if(queries.size>=50)queries.delete(queries.keys().next().value);

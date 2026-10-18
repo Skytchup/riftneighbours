@@ -3,6 +3,7 @@ import { planningAreas, locationChoices } from './areas.js';
 import { oneMap, LocationError } from './onemap.js';
 import { ensureSchema } from './schema.js';
 import { prepareDecks, deckStatements } from './decks.js';
+import { discover, locateArea } from './discovery.js';
 const locationLimits=new Map();
 function allowLocationSearch(uid){
  const time=Date.now(),entry=locationLimits.get(uid);
@@ -52,6 +53,24 @@ async function handle(req,env){
  if(!user)return json({error:'Please sign in'},401);
  const db=env.DB,uid=user.id;
  await ensureSchema(db);
+ Object.assign(user,await db.prepare('SELECT available_until,share_map FROM users WHERE id=?').bind(uid).first());
+ if(p==='/api/presence'&&req.method==='PUT'){
+  const b=await readPresence(req);
+  if(!user.area_id)return json({error:'Choose your location in Profile first.'},400);
+  if(typeof b.available!=='boolean'&&typeof b.share_map!=='boolean')return json({error:'Choose your availability or map visibility.'},400);
+  if(b.share_map===true&&user.area_id.startsWith('sg-pa-'))return json({error:'Select your condo in Profile before sharing your map location.'},400);
+  const until=typeof b.available==='boolean'?(b.available?now()+7200:0):user.available_until;
+  const sharing=typeof b.share_map==='boolean'?(b.share_map?1:0):user.share_map;
+  await db.prepare('UPDATE users SET available_until=?,share_map=? WHERE id=?').bind(until,sharing,uid).run();
+  if(sharing)await locateArea(env,user.area_id);
+  return json({available_until:until,share_map:sharing});
+ }
+ if(p==='/api/discovery'&&req.method==='GET'){
+  if(!user.area_id)return json({error:'Choose your location in Profile first.'},400);
+  const radius=Number(url.searchParams.get('radius')||5);
+  if(![2,5,10,20].includes(radius))return json({error:'Choose a valid search radius.'},400);
+  return json(await discover(env,user,{scope:url.searchParams.get('scope')==='condo'?'condo':'area',radius}));
+ }
  if(p==='/api/logout'&&req.method==='POST'){await db.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await hash(cookies(req).rn_session||'')).run();return json({ok:true},200,{'set-cookie':cookie('rn_session','',0)})}
  const read=async()=>{if(Number(req.headers.get('content-length'))>12000)throw Error('body too large');const raw=await req.text();if(raw.length>12000)throw Error('body too large');return JSON.parse(raw)};
  if(p==='/api/locations'&&req.method==='GET'){
@@ -70,7 +89,7 @@ async function handle(req,env){
   const planning=planningAreas.find(a=>a.id===b.area_id);
   let selected=planning||await db.prepare('SELECT * FROM areas WHERE id=?').bind(b.area_id).first();
   if(!selected)return json({error:'Choose a location from the list'},400);
-  let condo=(b.condo_name||'').normalize('NFKC').trim().replace(/\s+/g,' ');
+  let condo=(b.condo_name||'').normalize('NFKC').trim().replace(/\s+/g,' '),geometry=null;
   if(b.onemap_selection!==undefined){
    const choice=b.onemap_selection;
    if(!planning||!choice||!text(choice.query,100)||!text(choice.id,24))return json({error:'Choose a neighbourhood and search result again.'},400);
@@ -79,6 +98,7 @@ async function handle(req,env){
     const result=(await oneMap(env).search(choice.query)).find(a=>a.id===choice.id);
     if(!result)return json({error:'That location is no longer in the search results. Please search again.'},400);
     condo=result.name;
+    if(result.latitude!=null&&result.longitude!=null)geometry=result;
    }catch(error){if(error instanceof LocationError)return json({error:error.message},503);throw error}
   }
   if(condo&&!planning)return json({error:'Choose a neighbourhood before adding your condo'},400);
@@ -86,7 +106,8 @@ async function handle(req,env){
   const share=b.share_condo===true&&!selected.id.startsWith('sg-pa-')?1:0;
   await db.batch([
    db.prepare('INSERT OR IGNORE INTO areas(id,name,neighbourhood) VALUES(?,?,?)').bind(selected.id,selected.name,selected.neighbourhood),
-   db.prepare('UPDATE users SET username=?,area_id=?,style=?,share_condo=? WHERE id=?').bind(b.username.trim(),selected.id,b.style,share,uid),
+   ...(geometry?[db.prepare('UPDATE areas SET latitude=COALESCE(latitude,?),longitude=COALESCE(longitude,?),address=CASE WHEN address=\'\' THEN ? ELSE address END,postal=CASE WHEN postal=\'\' THEN ? ELSE postal END WHERE id=?').bind(geometry.latitude,geometry.longitude,geometry.address,geometry.postal,selected.id)]:[]),
+   db.prepare('UPDATE users SET username=?,area_id=?,style=?,share_condo=?,share_map=? WHERE id=?').bind(b.username.trim(),selected.id,b.style,share,selected.id.startsWith('sg-pa-')?0:(b.share_map===undefined?user.share_map:b.share_map===true?1:0),uid),
    ...(decks===undefined?[]:deckStatements(db,uid,decks))
   ]);
   return json({ok:true,area:{...selected,kind:selected.id.startsWith('sg-pa-')?'neighbourhood':'condo'}});
@@ -154,3 +175,4 @@ async function handle(req,env){
  if(p==='/api/account'&&req.method==='DELETE'){await db.batch([db.prepare('DELETE FROM games WHERE user_id=?').bind(uid),db.prepare('DELETE FROM users WHERE id=?').bind(uid)]);return json({ok:true},200,{'set-cookie':cookie('rn_session','',0)})}
  return json({error:'Not found'},404);
 }
+async function readPresence(req){const raw=await req.text();if(raw.length>1000)throw Error('body too large');return JSON.parse(raw)}

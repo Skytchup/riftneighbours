@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
 import worker from '../src/worker.js';
-import {singaporeDate,singaporeDay,preferencesValid,validDate} from '../src/domain.js';
+import {singaporeDate,singaporeDay,singaporeSlot,preferencesValid,validDate} from '../src/domain.js';
 import {planningAreas} from '../src/areas.js';
 import {legends} from '../public/legends.js';
+import {locateArea} from '../src/discovery.js';
 const digest=async s=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))).map(x=>x.toString(16).padStart(2,'0')).join('');
 async function fixture({legacy=false}={}){const sql=new DatabaseSync(':memory:');sql.exec(readFileSync(new URL('../migrations/0001_initial.sql',import.meta.url),'utf8'));if(!legacy)sql.exec(readFileSync(new URL('../migrations/0002_game_deck_preferences.sql',import.meta.url),'utf8'));
  const DB={prepare(query){return {args:[],bind(...args){this.args=args;return this},async first(){return sql.prepare(query).get(...this.args)||null},async all(){return {results:sql.prepare(query).all(...this.args)}},async run(){return sql.prepare(query).run(...this.args)}}},async batch(items){sql.exec('BEGIN');try{const results=[];for(const i of items)results.push(await i.run());sql.exec('COMMIT');return results}catch(e){sql.exec('ROLLBACK');throw e}}};
@@ -16,6 +17,57 @@ async function fixture({legacy=false}={}){const sql=new DatabaseSync(':memory:')
  return {sql,call,env};}
 test('Singapore date rolls over independently of UTC',()=>{assert.equal(singaporeDate(new Date('2026-10-16T16:01:00Z')),'2026-10-17');assert.equal(singaporeDay('2026-10-17'),6);assert.equal(validDate('2026-02-30'),false);assert.equal(preferencesValid([{day:7,slot:'evening'}]),false);assert.equal(preferencesValid([{day:1,slot:'evening'},{day:1,slot:'evening'}]),false)});
 test('authentication and cross-origin writes fail closed',async()=>{const {call}=await fixture();assert.equal((await call('me','GET',null,'invalid')).status,401);assert.equal((await call('tonight','PUT',{slot:'evening',available:true},'me','https://evil.test')).status,403)});
+
+test('Available Now expires after two hours, can be stopped, and does not implicitly share map identity',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-19T10:30:00Z')});
+ const {call,sql}=await fixture();await call('me');
+ let result=await call('presence','PUT',{available:true});assert.equal(result.status,200);assert.equal(result.data.available_until,Math.floor(Date.now()/1000)+7200);assert.equal(result.data.share_map,0);
+ await call('presence','PUT',{available:false});assert.equal((await call('me')).data.user.available_until,0);
+ const active=await call('presence','PUT',{available:true});
+ t.mock.timers.tick(7200001);sql.prepare('UPDATE sessions SET expires_at=?').run(Math.floor(Date.now()/1000)+3600);
+ assert.ok((await call('me')).data.user.available_until<=Date.now()/1000);
+ assert.equal((await call('presence','PUT',{share_map:true})).data.available_until,active.data.available_until);
+ await call('profile','PUT',{username:'Alex',area_id:'sg-pa-bedok',style:'casual',share_condo:false});
+ assert.equal((await call('presence','PUT',{share_map:true})).status,400);
+});
+
+test('map discovery uses current SGT schedule, opt-in, exact coordinates, radius and blocking',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-19T10:30:00Z')});
+ assert.equal(singaporeSlot(),'evening');
+ const {call,sql}=await fixture();await call('me');
+ sql.prepare('UPDATE areas SET latitude=?,longitude=?,address=? WHERE id=?').run(1.35,103.87,'1 Example Road','a');
+ sql.prepare('UPDATE areas SET latitude=?,longitude=?,address=? WHERE id=?').run(1.36,103.88,'2 Example Road','b');
+ sql.prepare('UPDATE areas SET latitude=?,longitude=? WHERE id=?').run(1.45,103.75,'c');
+ sql.prepare('UPDATE users SET available_until=?').run(Math.floor(Date.now()/1000)+7200);
+ assert.equal((await call('discovery')).data.groups.length,0); // existing aggregate consent is insufficient
+ sql.prepare('UPDATE users SET share_map=1,available_until=0').run();
+ sql.prepare('UPDATE users SET available_until=? WHERE id=?').run(Math.floor(Date.now()/1000)+7200,'other');
+ for(const uid of ['other','third','far'])sql.prepare('INSERT INTO preferences VALUES(?,?,?,?)').run(uid,singaporeDay(singaporeDate()),'evening',Math.floor(Date.now()/1000));
+ let found=await call('discovery');assert.equal(found.status,200);assert.equal(found.data.groups.length,2);
+ assert.equal((await call('discovery?radius=20')).data.groups.length,3);
+ assert.deepEqual(found.data.groups.flatMap(g=>g.players.map(p=>p.status)),['now','usual']);
+ assert.equal(found.data.groups.flatMap(g=>g.players).length,2); // self and distant player excluded
+ assert.equal((await call('discovery?scope=condo')).data.groups.length,1);
+ assert.equal((await call('discovery?radius=0')).status,400);
+ await call('blocks','POST',{user_id:'other'});assert.equal((await call('discovery')).data.groups.flatMap(g=>g.players).length,1);
+ sql.prepare('UPDATE areas SET latitude=NULL,longitude=NULL WHERE id=?').run('b');
+ const unmapped=await call('discovery');assert.equal(unmapped.data.groups.length,0);assert.equal(unmapped.data.unmapped,1);
+ sql.prepare('UPDATE preferences SET updated_at=0').run();assert.equal((await call('discovery')).data.groups.length,0);
+ assert.equal(singaporeSlot(new Date('2026-10-19T05:59:00Z')),null);
+ assert.equal(singaporeSlot(new Date('2026-10-19T06:00:00Z')),'afternoon');
+ assert.equal(singaporeSlot(new Date('2026-10-19T13:00:00Z')),'late');
+});
+
+test('existing condos receive exact-name OneMap coordinates without changing their saved identity',async t=>{
+ const {env,call,sql}=await fixture();await call('me');env.ONEMAP_EMAIL='operator@example.test';env.ONEMAP_PASSWORD='private';
+ t.mock.method(globalThis,'fetch',async url=>Response.json(String(url).includes('/getToken')?{access_token:'token',expiry_timestamp:Math.floor(Date.now()/1000)+3600}:{results:[
+  {BUILDING:'TEST ESTATE CLUBHOUSE',ADDRESS:'Wrong result',LATITUDE:'1.4',LONGITUDE:'103.9'},
+  {BUILDING:'TEST ESTATE',ADDRESS:'1 Test Road',POSTAL:'123456',LATITUDE:'1.35',LONGITUDE:'103.87'}
+ ]}));
+ const located=await locateArea(env,'a');assert.equal(located.id,'a');assert.equal(located.latitude,1.35);
+ assert.equal(sql.prepare('SELECT address FROM areas WHERE id=?').get('a').address,'1 Test Road');
+ assert.equal((await call('me')).data.user.area_id,'a');
+});
 
 test('manual initial schema upgrades safely and profile save opens Nearby without missing game columns',async()=>{
  const {call,sql}=await fixture({legacy:true});
@@ -150,7 +202,7 @@ test('OneMap search requires a session and saves only a server-validated buildin
  let calls=0;
  t.mock.method(globalThis,'fetch',async url=>{
   calls++;
-  return Response.json(String(url).includes('/getToken')?{access_token:'private-token',expiry_timestamp:Math.floor(Date.now()/1000)+3600}:{results:[{BUILDING:'EXAMPLE GARDENS',ADDRESS:'1 EXAMPLE ROAD',POSTAL:'123456'}]});
+  return Response.json(String(url).includes('/getToken')?{access_token:'private-token',expiry_timestamp:Math.floor(Date.now()/1000)+3600}:{results:[{BUILDING:'EXAMPLE GARDENS',ADDRESS:'1 EXAMPLE ROAD',POSTAL:'123456',LATITUDE:'1.35',LONGITUDE:'103.87'}]});
  });
  assert.equal((await call('locations?q=garden','GET',null,'invalid')).status,401);assert.equal(calls,0);
  assert.equal((await call('locations?q=ab')).status,400);
@@ -159,6 +211,7 @@ test('OneMap search requires a session and saves only a server-validated buildin
  const selected=found.data.results[0];
  const body={username:'Alex',area_id:'sg-pa-bedok',style:'casual',share_condo:true,condo_name:'Forged client name',onemap_selection:{query:'garden',id:selected.id}};
  const saved=await call('profile','PUT',body);assert.equal(saved.status,200);assert.equal(saved.data.area.name,'EXAMPLE GARDENS');
+ const restoredArea=(await call('me')).data.areas.find(a=>a.id===saved.data.area.id);assert.equal(restoredArea.latitude,1.35);assert.equal(restoredArea.longitude,103.87);assert.equal(restoredArea.address,'1 EXAMPLE ROAD');
  assert.equal((await call('me')).data.user.area_id,saved.data.area.id);
  assert.equal((await call('profile','PUT',{...body,onemap_selection:{query:'garden',id:'forged'}})).status,400);
  assert.equal((await call('me')).data.user.area_id,saved.data.area.id);
