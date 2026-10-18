@@ -59,5 +59,32 @@ export function oneMap(env) {
    throw new LocationError('Location search is temporarily unavailable. Please try again.');
   }
  }
- const service={search};services.set(env,service);return service;
+ const routes=new Map();
+ async function authorized(url){
+  let response;
+  for(let attempt=0;attempt<2;attempt++){
+   const value=await authenticate();response=await fetch(url,{headers:{Authorization:value},signal:AbortSignal.timeout(8000)});
+   if(![401,403].includes(response.status))break;if(token?.value===value)token=null;
+  }
+  if(!response.ok)throw new LocationError('OneMap lookup is temporarily unavailable.');
+  return response.json();
+ }
+ async function walk(start,end){
+  const key=[start.latitude,start.longitude,end.latitude,end.longitude].join(',');
+  const cached=routes.get(key);if(cached&&cached.expires>Date.now()){if(cached.error)throw new LocationError('No walking route available.');return cached.value}
+  const url=new URL('https://www.onemap.gov.sg/api/public/routingsvc/route');
+  url.search=new URLSearchParams({start:`${start.latitude},${start.longitude}`,end:`${end.latitude},${end.longitude}`,routeType:'walk'});
+  try{
+   const data=await authorized(url),seconds=Number(data.route_summary?.total_time);
+   if(data.status!==0||!Number.isFinite(seconds)||seconds<0)throw new LocationError('No walking route found.');
+   const value={minutes:Math.max(1,Math.ceil(seconds/60)),estimated:false};
+   if(routes.size>=100)routes.delete(routes.keys().next().value);routes.set(key,{expires:Date.now()+3600000,value});return value;
+  }catch(error){if(routes.size>=100)routes.delete(routes.keys().next().value);routes.set(key,{expires:Date.now()+300000,error:true});throw error}
+ }
+ async function planningArea(point){
+  const url=new URL('https://www.onemap.gov.sg/api/public/popapi/getPlanningarea');
+  url.search=new URLSearchParams({latitude:String(point.latitude),longitude:String(point.longitude),year:'2019'});
+  const data=await authorized(url);return Array.isArray(data)&&typeof data[0]?.pln_area_n==='string'?data[0].pln_area_n:null;
+ }
+ const service={search,walk,planningArea};services.set(env,service);return service;
 }

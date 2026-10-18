@@ -18,6 +18,85 @@ async function fixture({legacy=false}={}){const sql=new DatabaseSync(':memory:')
 test('Singapore date rolls over independently of UTC',()=>{assert.equal(singaporeDate(new Date('2026-10-16T16:01:00Z')),'2026-10-17');assert.equal(singaporeDay('2026-10-17'),6);assert.equal(validDate('2026-02-30'),false);assert.equal(preferencesValid([{day:7,slot:'evening'}]),false);assert.equal(preferencesValid([{day:1,slot:'evening'},{day:1,slot:'evening'}]),false)});
 test('authentication and cross-origin writes fail closed',async()=>{const {call}=await fixture();assert.equal((await call('me','GET',null,'invalid')).status,401);assert.equal((await call('tonight','PUT',{slot:'evening',available:true},'me','https://evil.test')).status,403)});
 
+test('condo favourites persist privately per account and always include the current home condo',async()=>{
+ const {call,sql}=await fixture();
+ let overview=await call('condos');assert.equal(overview.status,200);assert.equal(overview.data.favourites[0].id,'a');assert.equal(overview.data.favourites[0].is_home,true);
+ assert.equal((await call('condos/favourites','PUT',{area_id:'b'})).status,200);
+ assert.equal((await call('condos/favourites','PUT',{area_id:'b'})).status,200);
+ assert.equal((await call('condos')).data.favourites.length,2);
+ assert.equal((await call('condos','GET',null,'other')).data.favourites.length,1);
+ await call('condos/favourites','DELETE',{area_id:'a'});assert.equal((await call('condos')).data.favourites[0].id,'a');
+ await call('condos/favourites','DELETE',{area_id:'b'});assert.equal((await call('condos')).data.favourites.length,1);
+ assert.equal(sql.prepare('SELECT count(*) n FROM condo_favourites').get().n,0);
+ assert.equal((await call('condos/favourites','PUT',{area_id:'unknown'})).status,400);
+ assert.equal((await call('condos','GET',null,'invalid')).status,401);
+});
+
+test('condo week grids return only anonymous opted-in totals across all 21 slots',async()=>{
+ const {call,sql}=await fixture();await call('me');
+ const stamp=Math.floor(Date.now()/1000);
+ for(const uid of ['me','other'])sql.prepare('INSERT INTO preferences VALUES(?,?,?,?)').run(uid,3,'evening',stamp);
+ sql.prepare('INSERT INTO preferences VALUES(?,?,?,?)').run('other',5,'late',0);
+ let response=await call('condos/a/schedule');assert.equal(response.status,200);assert.equal(response.data.cells.length,21);
+ assert.equal(response.data.cells.find(c=>c.day===3&&c.slot==='evening').count,2);
+ assert.equal(response.data.cells.find(c=>c.day===5&&c.slot==='late').count,0);
+ assert.ok(!JSON.stringify(response.data).includes('secret-name'));assert.ok(!('players' in response.data));
+ sql.prepare('UPDATE users SET share_condo=0,share_map=1 WHERE id=?').run('other');
+ assert.equal((await call('condos/a/schedule')).data.cells.find(c=>c.day===3&&c.slot==='evening').count,1);
+ sql.prepare('UPDATE users SET share_condo=1 WHERE id=?').run('other');await call('blocks','POST',{user_id:'other'});
+ assert.equal((await call('condos/a/schedule')).data.cells.find(c=>c.day===3&&c.slot==='evening').count,1);
+ assert.equal((await call('condos/not-found/schedule')).status,404);
+});
+
+test('OneMap condo search can open a new condo and favourite it without changing the home profile',async t=>{
+ const {env,call}=await fixture();env.ONEMAP_EMAIL='operator@example.test';env.ONEMAP_PASSWORD='private';
+ t.mock.method(globalThis,'fetch',async url=>{
+  if(String(url).includes('/getToken'))return Response.json({access_token:'token',expiry_timestamp:Math.floor(Date.now()/1000)+3600});
+  if(String(url).includes('getPlanningarea'))return Response.json([{pln_area_n:'BEDOK'}]);
+  return Response.json({results:[{BUILDING:'NEW GARDENS',ADDRESS:'1 New Road',POSTAL:'123456',LATITUDE:'1.35',LONGITUDE:'103.87'}]});
+ });
+ const search=await call('condos/search?q=new');assert.equal(search.status,200);
+ const result=search.data.results.find(a=>a.name==='NEW GARDENS');assert.equal(result.saved,false);
+ const selected=await call('condos/select','POST',{query:'new',id:result.id});assert.equal(selected.status,200);assert.equal(selected.data.area.neighbourhood,'Bedok');
+ assert.equal((await call('me')).data.user.area_id,'a');
+ assert.equal((await call('condos/'+selected.data.area.id+'/schedule')).data.cells.every(c=>c.count===0),true);
+ await call('condos/favourites','PUT',{area_id:selected.data.area.id});assert.ok((await call('condos')).data.favourites.some(a=>a.id===selected.data.area.id));
+ const repeated=await call('condos/select','POST',{query:'new',id:result.id});assert.equal(repeated.data.area.id,selected.data.area.id);
+ assert.equal((await call('condos/select','POST',{query:'new',id:'fake'})).status,503);
+});
+
+test('nearby condos use walking routes, rank available players first, then fall back to weekly popularity',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-19T10:30:00Z')});
+ const {env,call,sql}=await fixture();await call('me');env.ONEMAP_EMAIL='operator@example.test';env.ONEMAP_PASSWORD='private';
+ for(const [id,lat] of [['a',1.35],['b',1.351],['c',1.352]])sql.prepare('UPDATE areas SET latitude=?,longitude=? WHERE id=?').run(lat,103.87,id);
+ sql.prepare('UPDATE users SET area_id=? WHERE id=?').run('b','other');
+ sql.prepare('UPDATE users SET area_id=? WHERE id=?').run('c','third');
+ sql.prepare('UPDATE users SET area_id=? WHERE id=?').run('c','far');
+ for(const uid of ['other','third','far'])sql.prepare('INSERT INTO preferences VALUES(?,?,?,?)').run(uid,1,'evening',Math.floor(Date.now()/1000));
+ sql.prepare('UPDATE users SET available_until=? WHERE id=?').run(Math.floor(Date.now()/1000)+3600,'other');
+ t.mock.method(globalThis,'fetch',async url=>{
+  if(String(url).includes('/getToken'))return Response.json({access_token:'token',expiry_timestamp:Math.floor(Date.now()/1000)+3600});
+  const u=new URL(url);assert.equal(u.searchParams.get('routeType'),'walk');
+  return Response.json({status:0,route_summary:{total_time:u.searchParams.get('end').startsWith('1.351,')?840:600}});
+ });
+ let response=await call('condos');assert.equal(response.status,200);assert.deepEqual(response.data.nearby.map(a=>a.id),['b','c']);assert.equal(response.data.nearby[0].walk.minutes,14);assert.equal(response.data.nearby[0].walk.estimated,false);
+ sql.prepare('UPDATE users SET available_until=0').run();response=await call('condos');assert.deepEqual(response.data.nearby.map(a=>a.id),['c','b']);
+ assert.ok(!JSON.stringify(response.data).includes('secret-name'));
+});
+
+test('walking suggestions exclude long routes and clearly label distance fallback when routing fails',async t=>{
+ const {env,call,sql}=await fixture();await call('me');env.ONEMAP_EMAIL='operator@example.test';env.ONEMAP_PASSWORD='private';
+ sql.prepare('UPDATE areas SET latitude=1.35,longitude=103.87 WHERE id=?').run('a');
+ sql.prepare('UPDATE areas SET latitude=1.351,longitude=103.87 WHERE id=?').run('b');
+ sql.prepare('INSERT INTO preferences VALUES(?,?,?,?)').run('third',1,'evening',Math.floor(Date.now()/1000));
+ const mock=t.mock.method(globalThis,'fetch',async url=>Response.json(String(url).includes('/getToken')?{access_token:'token',expiry_timestamp:Math.floor(Date.now()/1000)+3600}:{status:0,route_summary:{total_time:901}}));
+ assert.equal((await call('condos')).data.nearby.length,0);
+ // A fresh service simulates a provider outage after a cold start.
+ const second=await fixture();await second.call('me');second.sql.prepare('UPDATE areas SET latitude=1.35,longitude=103.87 WHERE id=?').run('a');second.sql.prepare('UPDATE areas SET latitude=1.351,longitude=103.87 WHERE id=?').run('b');second.sql.prepare('INSERT INTO preferences VALUES(?,?,?,?)').run('third',1,'evening',Math.floor(Date.now()/1000));
+ mock.mock.mockImplementation(async()=>{throw Error('upstream unavailable')});
+ const result=await second.call('condos');assert.equal(result.status,200);assert.equal(result.data.nearby[0].walk.estimated,true);assert.ok(result.data.nearby[0].walk.minutes<=15);
+});
+
 test('Available Now expires after two hours, can be stopped, and does not implicitly share map identity',async t=>{
  t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-19T10:30:00Z')});
  const {call,sql}=await fixture();await call('me');

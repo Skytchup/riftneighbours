@@ -1,9 +1,11 @@
+import {showCondos} from './condo-view.js';
 import {mountMap,visibleGroups} from './nearby-map.js';
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clock=value=>new Intl.DateTimeFormat('en-SG',{timeZone:'Asia/Singapore',hour:'numeric',minute:'2-digit'}).format(new Date(value*1000));
 let activeMap=null,chosenFilter='all';
 export function disposeDiscovery(){activeMap?.destroy();activeMap=null}
 export async function showNearby(o){
+ if(o.scope==='condo')return showCondos(o);
  const {app,state,demo,scope,radius,api,valid}=o;
  const time=Math.floor(Date.now()/1000),available=state.user.available_until>time;
  let data,games=[],gamesError='';

@@ -11,6 +11,7 @@ const additions={
 export async function ensureSchema(db){
  if(!ready.has(db)){
   const task=(async()=>{
+   await db.prepare('CREATE TABLE IF NOT EXISTS condo_favourites (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,area_id TEXT NOT NULL REFERENCES areas(id) ON DELETE CASCADE,created_at INTEGER NOT NULL,PRIMARY KEY(user_id,area_id))').run();
    for(const [table,columns] of Object.entries(additions)){
     const existing=new Set((await db.prepare(`PRAGMA table_info(${table})`).all()).results.map(c=>c.name));
     for(const [column,definition] of Object.entries(columns))if(!existing.has(column)){

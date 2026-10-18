@@ -4,6 +4,7 @@ import { oneMap, LocationError } from './onemap.js';
 import { ensureSchema } from './schema.js';
 import { prepareDecks, deckStatements } from './decks.js';
 import { discover, locateArea } from './discovery.js';
+import { condoOverview,condoSchedule,condoSearch,registerCondo } from './condos.js';
 const locationLimits=new Map();
 function allowLocationSearch(uid){
  const time=Date.now(),entry=locationLimits.get(uid);
@@ -73,6 +74,34 @@ async function handle(req,env){
  }
  if(p==='/api/logout'&&req.method==='POST'){await db.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await hash(cookies(req).rn_session||'')).run();return json({ok:true},200,{'set-cookie':cookie('rn_session','',0)})}
  const read=async()=>{if(Number(req.headers.get('content-length'))>12000)throw Error('body too large');const raw=await req.text();if(raw.length>12000)throw Error('body too large');return JSON.parse(raw)};
+ if(p==='/api/condos'&&req.method==='GET')return json(await condoOverview(env,user));
+ if(p==='/api/condos/search'&&req.method==='GET'){
+  const query=(url.searchParams.get('q')||'').trim();
+  if(!text(query,100)||query.length<3)return json({error:'Enter at least 3 characters of a condo name or postal code.'},400);
+  if(!allowLocationSearch(uid))return json({error:'Please wait a minute before searching again.'},429);
+  return json(await condoSearch(env,query));
+ }
+ if(p==='/api/condos/select'&&req.method==='POST'){
+  const b=await read();
+  if(!b||!text(b.query,100)||!text(b.id,24))return json({error:'Select a valid search result.'},400);
+  if(!allowLocationSearch(uid))return json({error:'Please wait a minute before selecting another result.'},429);
+  try{return json({area:await registerCondo(env,b)})}catch(error){return json({error:error instanceof LocationError?error.message:'This location could not be loaded. Please try again.'},503)}
+ }
+ if(p==='/api/condos/favourites'&&['PUT','DELETE'].includes(req.method)){
+  const b=await read();
+  if(!b||!text(b.area_id,100)||b.area_id.startsWith('sg-pa-')||!await db.prepare('SELECT id FROM areas WHERE id=?').bind(b.area_id).first())return json({error:'Choose a condo from the search results.'},400);
+  if(req.method==='DELETE')await db.prepare('DELETE FROM condo_favourites WHERE user_id=? AND area_id=?').bind(uid,b.area_id).run();
+  else{
+   const count=await db.prepare('SELECT COUNT(*) n FROM condo_favourites WHERE user_id=?').bind(uid).first();
+   if(count.n>=30&&!await db.prepare('SELECT 1 FROM condo_favourites WHERE user_id=? AND area_id=?').bind(uid,b.area_id).first())return json({error:'You can save up to 30 favourite condos.'},400);
+   await db.prepare('INSERT OR IGNORE INTO condo_favourites(user_id,area_id,created_at) VALUES(?,?,?)').bind(uid,b.area_id,now()).run();
+  }
+  return json({ok:true});
+ }
+ const condoMatch=p.match(/^\/api\/condos\/([a-zA-Z0-9-]+)\/schedule$/);
+ if(condoMatch&&req.method==='GET'){
+  const schedule=await condoSchedule(db,user,condoMatch[1]);return schedule?json(schedule):json({error:'Condo not found.'},404);
+ }
  if(p==='/api/locations'&&req.method==='GET'){
   const query=url.searchParams.get('q')||'';
   if(!text(query,100)||query.trim().length<3)return json({error:'Enter 3–100 characters of a condo name or postal code.'},400);
