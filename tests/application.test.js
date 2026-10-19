@@ -32,7 +32,7 @@ test('condo favourites persist privately per account and always include the curr
  assert.equal((await call('condos','GET',null,'invalid')).status,401);
 });
 
-test('condo week grids return only anonymous opted-in totals across all 21 slots',async()=>{
+test('condo week grids return only anonymous default totals across all 21 slots',async()=>{
  const {call,sql}=await fixture();await call('me');
  const stamp=Math.floor(Date.now()/1000);
  for(const uid of ['me','other'])sql.prepare('INSERT INTO preferences VALUES(?,?,?,?)').run(uid,3,'evening',stamp);
@@ -42,7 +42,7 @@ test('condo week grids return only anonymous opted-in totals across all 21 slots
  assert.equal(response.data.cells.find(c=>c.day===5&&c.slot==='late').count,0);
  assert.ok(!JSON.stringify(response.data).includes('secret-name'));assert.ok(!('players' in response.data));
  sql.prepare('UPDATE users SET share_condo=0,share_map=1 WHERE id=?').run('other');
- assert.equal((await call('condos/a/schedule')).data.cells.find(c=>c.day===3&&c.slot==='evening').count,1);
+ assert.equal((await call('condos/a/schedule')).data.cells.find(c=>c.day===3&&c.slot==='evening').count,2);
  sql.prepare('UPDATE users SET share_condo=1 WHERE id=?').run('other');await call('blocks','POST',{user_id:'other'});
  assert.equal((await call('condos/a/schedule')).data.cells.find(c=>c.day===3&&c.slot==='evening').count,1);
  assert.equal((await call('condos/not-found/schedule')).status,404);
@@ -110,7 +110,7 @@ test('Available Now expires after two hours, can be stopped, and does not implic
  assert.equal((await call('presence','PUT',{share_map:true})).status,400);
 });
 
-test('map discovery uses current SGT schedule, opt-in, exact coordinates, radius and blocking',async t=>{
+test('map discovery uses current SGT schedule, anonymous defaults, exact coordinates, radius and blocking',async t=>{
  t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-19T10:30:00Z')});
  assert.equal(singaporeSlot(),'evening');
  const {call,sql}=await fixture();await call('me');
@@ -118,17 +118,17 @@ test('map discovery uses current SGT schedule, opt-in, exact coordinates, radius
  sql.prepare('UPDATE areas SET latitude=?,longitude=?,address=? WHERE id=?').run(1.36,103.88,'2 Example Road','b');
  sql.prepare('UPDATE areas SET latitude=?,longitude=? WHERE id=?').run(1.45,103.75,'c');
  sql.prepare('UPDATE users SET available_until=?').run(Math.floor(Date.now()/1000)+7200);
- assert.equal((await call('discovery')).data.groups.length,0); // existing aggregate consent is insufficient
+ assert.equal((await call('discovery')).data.groups.length,2); // anonymous presence is included by default
  sql.prepare('UPDATE users SET share_map=1,available_until=0').run();
  sql.prepare('UPDATE users SET available_until=? WHERE id=?').run(Math.floor(Date.now()/1000)+7200,'other');
  for(const uid of ['other','third','far'])sql.prepare('INSERT INTO preferences VALUES(?,?,?,?)').run(uid,singaporeDay(singaporeDate()),'evening',Math.floor(Date.now()/1000));
  let found=await call('discovery');assert.equal(found.status,200);assert.equal(found.data.groups.length,2);
  assert.equal((await call('discovery?radius=20')).data.groups.length,3);
- assert.deepEqual(found.data.groups.flatMap(g=>g.players.map(p=>p.status)),['now','usual']);
- assert.equal(found.data.groups.flatMap(g=>g.players).length,2); // self and distant player excluded
+ assert.equal(found.data.groups.reduce((n,g)=>n+g.ready_count,0),1);assert.equal(found.data.groups.reduce((n,g)=>n+g.usual_count,0),2);assert.ok(!JSON.stringify(found.data).includes('secret-name'));assert.ok(found.data.groups.every(g=>!('players' in g)));
+ assert.equal(found.data.groups.reduce((n,g)=>n+g.total_count,0),2); // self and distant player excluded
  assert.equal((await call('discovery?scope=condo')).data.groups.length,1);
  assert.equal((await call('discovery?radius=0')).status,400);
- await call('blocks','POST',{user_id:'other'});assert.equal((await call('discovery')).data.groups.flatMap(g=>g.players).length,1);
+ await call('blocks','POST',{user_id:'other'});assert.equal((await call('discovery')).data.groups.reduce((n,g)=>n+g.total_count,0),1);
  sql.prepare('UPDATE areas SET latitude=NULL,longitude=NULL WHERE id=?').run('b');
  const unmapped=await call('discovery');assert.equal(unmapped.data.groups.length,0);assert.equal(unmapped.data.unmapped,1);
  sql.prepare('UPDATE preferences SET updated_at=0').run();assert.equal((await call('discovery')).data.groups.length,0);
