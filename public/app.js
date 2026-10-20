@@ -25,7 +25,8 @@ let presenceUpdating=false;
 function renderPresence(){
  const button=document.querySelector('#available-now'),ready=Boolean(state?.user.available_until>Date.now()/1000);
  button.setAttribute('aria-pressed',String(ready));button.classList.toggle('is-active',ready);button.disabled=presenceUpdating;
- button.innerHTML='<strong>'+(ready?"I’m Ready to Play":'Enter the Rift')+'</strong><small>'+(ready?'No longer available? Click to leave the list. Availability expires after 2 hours.':'Click to appear as Ready to Play. Your username and contact details stay private.')+'</small>';
+ button.innerHTML='<strong>'+(ready?'Ready to Play!':'Ready to play? Click here!')+'</strong>';
+
 }
 async function togglePresence(){
  if(!state||presenceUpdating)return;
@@ -34,7 +35,7 @@ async function togglePresence(){
  try{const result=demo?{available_until:available?Date.now()/1000+7200:0}:await api('presence','PUT',{available});if(state?.user.id!==uid)return;Object.assign(state.user,result);persist();renderPresence();if(location.hash==='#nearby')await render();}
  catch(error){toast(error.message)}finally{presenceUpdating=false;renderPresence()}
 }
-function memberNavigation(visible){document.querySelector('#available-now').hidden=!visible;if(visible){updateAccount();renderPresence();}document.querySelector('nav').hidden=!visible;document.querySelector('#auth').hidden=!visible;document.querySelector('#account-menu').hidden=!visible;if(!visible){document.querySelector('#account-menu').open=false;document.querySelector('#play-menu').open=false;}}
+function memberNavigation(visible){document.querySelector('#available-now').hidden=!visible;document.querySelector('#kopi-button').hidden=!visible;if(visible){updateAccount();renderPresence();}document.querySelector('nav').hidden=!visible;document.querySelector('#auth').hidden=!visible;document.querySelector('#account-menu').hidden=!visible;if(!visible){document.querySelector('#account-menu').open=false;document.querySelector('#play-menu').open=false;}}
 function landing(){notificationData=[];notificationUnread=null;++view;disposeDiscovery();memberNavigation(false);app.innerHTML=`<section class="welcome"><img class="welcome-art" src="https://cmsassets.rgpub.io/sanity/images/dsfx7636/news_live/9e26afe304d2c40664b119a9da0ef82cff692f54-3840x2160.png?w=1100&fm=webp" alt="Riftbound artwork" width="1100" height="619"><div class="welcome-copy"><h1>Riftbound. Nearby.</h1><p>Casual Riftbound games with neighbours in Singapore.</p><p class="compact">Share your schedule, find players nearby and arrange a game together. No hosting required.</p><div class="row"><a class="button primary" href="/auth/google">Create account / sign in with Google</a></div></div></section>`;document.querySelector('#auth').onclick=()=>location.href='/auth/google'}
 function enterDemo(){demo=true;state=initial();gameList=[{id:'sample-game',user_id:'demo-jamie',title:'Two relaxed games after dinner?',date:today(),slot:'evening',venue:'decide'}];try{const saved=JSON.parse(localStorage.getItem('rn-demo'));if(saved?.state){state=saved.state;gameList=saved.gameList||[];myGames=saved.myGames||[]}}catch{}document.querySelector('#mode').hidden=false;document.querySelector('#mode').innerHTML='Demo mode · Fictional counts, browser-only changes, no real invitations. <button id="reset">Reset demo</button>';document.querySelector('#reset').onclick=()=>{localStorage.removeItem('rn-demo');state=initial();gameList=[];myGames=[];render()};document.querySelector('#auth').textContent='Exit demo';render()}
 function heading(eye,title,subtitle){return `<h1>${title}</h1>`}
@@ -103,6 +104,7 @@ for(const id of ['play-menu','account-menu'])document.querySelector('#'+id).addE
 document.querySelectorAll('nav a,#account-menu a').forEach(a=>a.addEventListener('click',event=>{if(a.hash===location.hash){event.preventDefault();render()}}));
 setInterval(refreshNotifications,30000);
 window.addEventListener('focus',refreshNotifications);
+document.querySelector('#kopi-button').onclick=()=>showModal('<div class="kopi-note"><span class="kopi-illustration" aria-hidden="true">☕ 🍞</span><h2>A little kopi goes a long way.</h2><p>Enjoying RiftNeighbours? You could fuel the human behind it with a kopi.</p><p>Feeling extra generous? A whole kaya toast set might turn “I’ll fix that later” into “already working on it!”</p><p class="muted compact">No paywalls. No special treatment. Just a well-fed neighbour dreaming up the next little improvement.</p><p class="compact">For now, your feedback and a game with a neighbour are lovely ways to support the project, too.</p></div>');
 document.querySelector('#available-now').onclick=togglePresence;
 setInterval(()=>{if(state&&!document.hidden)renderPresence()},30000);
 document.querySelector('#close-modal').onclick=()=>modal.close();window.addEventListener('hashchange',render);start();

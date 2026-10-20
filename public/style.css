@@ -189,3 +189,13 @@ header{gap:16px}nav{gap:16px}
 .discovery-overview{grid-template-columns:minmax(0,1fr) auto}
 @media(max-width:1100px){.rift-presence{order:3;flex-basis:100%;max-width:520px;width:100%;margin:0 auto}.site-topbar header{row-gap:12px}header nav{margin-left:auto}}
 @media(max-width:560px){.rift-presence{min-width:0;max-width:none;padding:9px 14px}.rift-presence small{max-width:320px}.site-topbar header{padding:12px 16px}.site-topbar .brand{font-size:16px}.discovery-overview{grid-template-columns:minmax(0,1fr);gap:12px}}
+
+.brand .sg{display:inline;font:inherit;letter-spacing:inherit;color:#bca779}
+.rift-presence{flex:0 1 auto;min-width:185px;max-width:255px;width:auto;padding:10px 16px;background:#702b32;border-color:#b76161;color:#fff0eb}
+.rift-presence strong{font-size:14px;font-weight:600;white-space:nowrap}
+.rift-presence.is-active{background:#1e6148;border-color:#71b595;color:#f0fff4}.rift-presence.is-active strong{font-weight:800}
+.kopi-button{width:39px;height:39px;padding:6px;flex-shrink:0;font-size:21px;background:transparent;border-color:#a98d55}
+.kopi-illustration{display:block;font-size:42px;margin-bottom:18px}.kopi-note h2{line-height:1.25}.kopi-note p{line-height:1.7}
+@media(hover:hover) and (pointer:fine){.rift-presence:not(:disabled):hover{background:#85343c;border-color:#d68882}.rift-presence.is-active:not(:disabled):hover{background:#287454;border-color:#9aceb0}}
+@media(max-width:1100px){.rift-presence{width:auto;flex-basis:auto;margin:0 auto;order:3}.kopi-button{margin-left:0}}
+@media(max-width:560px){.brand .sg{display:inline}.rift-presence{min-width:0;padding:9px 14px}.rift-presence strong{font-size:13px}.kopi-button{width:34px;height:34px;font-size:19px}}
