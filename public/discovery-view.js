@@ -10,7 +10,7 @@ export async function showNearby(o){
  let data;
  const gamesPromise=demo?Promise.resolve({games:o.demoGames}):state.user.area_id?api('games').catch(()=>({games:[],error:'Games could not load. Please refresh to retry.'})):Promise.resolve({games:[]});
  if(demo){
-  data={self_status:available?'now':null,home:{name:'Your demo condo',latitude:1.3508,longitude:103.8723},slot:'evening',unmapped:0,groups:[
+  data={self_status:available?'now':null,home:{name:'Your demo place',latitude:1.3508,longitude:103.8723},slot:'evening',unmapped:0,groups:[
    {id:'demo-a',name:'Demo Gardens (fictional)',address:'Sample location · demo only',latitude:1.353,longitude:103.876,distance:0.5,ready_count:1,usual_count:2,total_count:2},
    {id:'demo-b',name:'Demo Residences (fictional)',address:'Sample location · demo only',latitude:1.343,longitude:103.868,distance:1,ready_count:0,usual_count:1,total_count:1}
   ]};
@@ -18,14 +18,14 @@ export async function showNearby(o){
   data=await api('discovery?scope='+scope+'&radius='+radius);
  }else data={home:null,slot:null,groups:[],unmapped:0};
  if(!valid())return;
- const nowCount=data.groups.reduce((n,g)=>n+g.ready_count,0)+(available?1:0),usualCount=data.groups.reduce((n,g)=>n+g.usual_count,0)+(data.self_usual?1:0);
+ const nowCount=data.ready_total??(data.groups.reduce((n,g)=>n+g.ready_count,0)+(available?1:0)),usualCount=data.usual_total??(data.groups.reduce((n,g)=>n+g.usual_count,0)+(data.self_usual?1:0));
  const needsLocation=!data.home?.latitude;
  app.innerHTML=`<section class="discovery-overview"><div class="discovery-title"><h1>Who's nearby?</h1><div class="map-key"><span><i class="status-dot now"></i> ${nowCount} ready to play</span><span><i class="status-dot usual"></i> ${usualCount} usually available</span></div></div>
  <div class="discovery-controls"><div class="row"><label>Show<select id="map-filter"><option value="all">All players</option><option value="now">Ready to Play</option><option value="usual">Usually available</option></select></label><label>Within<select id="map-radius">${[2,5,10,20].map(r=>`<option value="${r}" ${r===radius?'selected':''}>${r} km</option>`).join('')}</select></label></div></div></section>
- <div class="discovery-layout"><div class="map-panel"><div id="nearby-map" aria-label="Map of nearby players by condo"></div><div class="map-caption"><span><i class="status-dot now"></i> Ready to Play</span><span><i class="status-dot usual"></i> Usually available</span><span>Condo locations · SGT</span></div></div><aside class="player-panel"><div class="row between"><h2>Nearby players</h2><button id="refresh-map" class="quiet">Refresh</button></div><div id="player-list"></div></aside></div>
- ${needsLocation?'<p class="map-note">Choose your condo using OneMap in <a href="#profile">Profile</a> to centre the map and search by distance. Without a condo location, results stay within your neighbourhood.</p>':''}
+ <div class="discovery-layout"><div class="map-panel"><div id="nearby-map" aria-label="Map of nearby players by place"></div><div class="map-caption"><span><i class="status-dot now"></i> Ready to Play</span><span><i class="status-dot usual"></i> Usually available</span><span>Selected places · SGT</span></div></div><aside class="player-panel"><div class="row between"><h2>Nearby players</h2><button id="refresh-map" class="quiet">Refresh</button></div><div id="player-list"></div></aside></div>
+ ${needsLocation?'<p class="map-note">Choose your selected place using OneMap in <a href="#profile">Profile</a> to centre the map and search by distance. Without a selected place, results stay within your neighbourhood.</p>':''}
  ${data.unmapped?'<p class="map-note">Some players do not yet have a map location.</p>':''}
- <p class="compact muted">${data.slot?'Amber matches the current '+esc(data.slot)+' slot in saved schedules.':'There is no scheduled slot before 2 pm; only Ready to Play appears.'} Scheduled availability is a preference, not a confirmation. Counts include you.</p>
+ <p class="compact muted">${data.slot?'Amber matches the current '+esc(data.slot)+' slot in saved schedules.':'There is no scheduled slot before 6 am; only Ready to Play appears.'} Scheduled availability is a preference, not a confirmation. Counts include you.</p>
  <div class="row between section games-heading"><h2>Nearby games</h2><button class="primary" id="suggest">Create a Game</button></div><div id="nearby-games-list"><p class="map-note" role="status">Loading games…</p></div>`;
  function gamesMarkup(games,error){return error?'<p class="notice">'+esc(error)+'</p>':games.length?'<div class="grid">'+games.map(o.lobbyCard).join('')+'</div>':'<div class="empty"><p>No games yet. Create a lobby and find a table together.</p></div>'}
  gamesPromise.then(result=>{

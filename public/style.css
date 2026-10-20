@@ -203,3 +203,6 @@ header{gap:16px}nav{gap:16px}
 .lobby-tools{flex-wrap:nowrap;justify-content:flex-start;gap:9px}
 .lobby-tools .lobby-icon{width:42px;height:42px;min-height:42px;padding:9px;flex:0 0 42px}
 .lobby-admin .text-button{padding:7px 0;text-decoration:underline;text-underline-offset:3px}
+
+.availability-place-controls{align-items:flex-end;gap:12px}.availability-place-controls label{flex:1;min-width:180px;margin:0}.availability-place-controls button{margin-bottom:0}.form>.schedule{grid-template-columns:105px repeat(7,minmax(0,1fr))}.form>.schedule .slotlabel{line-height:1.45}
+@media(max-width:560px){.availability-place-controls label{width:100%;flex-basis:100%}.form>.schedule{grid-template-columns:76px repeat(7,minmax(0,1fr));gap:3px}.form>.schedule .slotlabel{font-size:11px}}

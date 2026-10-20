@@ -32,12 +32,12 @@ test('condo favourites persist privately per account and always include the curr
  assert.equal((await call('condos','GET',null,'invalid')).status,401);
 });
 
-test('condo week grids return only anonymous default totals across all 21 slots',async()=>{
+test('condo week grids return only anonymous default totals across all 35 slots',async()=>{
  const {call,sql}=await fixture();await call('me');
  const stamp=Math.floor(Date.now()/1000);
  for(const uid of ['me','other'])sql.prepare('INSERT INTO preferences VALUES(?,?,?,?)').run(uid,3,'evening',stamp);
  sql.prepare('INSERT INTO preferences VALUES(?,?,?,?)').run('other',5,'late',0);
- let response=await call('condos/a/schedule');assert.equal(response.status,200);assert.equal(response.data.cells.length,21);
+ let response=await call('condos/a/schedule');assert.equal(response.status,200);assert.equal(response.data.cells.length,35);
  assert.equal(response.data.cells.find(c=>c.day===3&&c.slot==='evening').count,2);
  assert.equal(response.data.cells.find(c=>c.day===5&&c.slot==='late').count,0);
  assert.ok(!JSON.stringify(response.data).includes('secret-name'));assert.ok(!('players' in response.data));
@@ -132,7 +132,7 @@ test('map discovery uses current SGT schedule, anonymous defaults, exact coordin
  sql.prepare('UPDATE areas SET latitude=NULL,longitude=NULL WHERE id=?').run('b');
  const unmapped=await call('discovery');assert.equal(unmapped.data.groups.length,0);assert.equal(unmapped.data.unmapped,1);
  sql.prepare('UPDATE preferences SET updated_at=0').run();assert.equal((await call('discovery')).data.groups.length,0);
- assert.equal(singaporeSlot(new Date('2026-10-19T05:59:00Z')),null);
+ assert.equal(singaporeSlot(new Date('2026-10-19T05:59:00Z')),'lunch');
  assert.equal(singaporeSlot(new Date('2026-10-19T06:00:00Z')),'afternoon');
  assert.equal(singaporeSlot(new Date('2026-10-19T13:00:00Z')),'late');
 });
@@ -426,4 +426,30 @@ test('pending players can withdraw their request without deleting the game',asyn
  const {call}=await fixture();const id=(await call('games','POST',{title:'Withdraw',date:singaporeDate(),start_time:'20:00',venue:'decide',deck_need:'own',extra_decks:false})).data.id;
  await call('games/'+id+'/join','POST',{deck_need:'own',extra_decks:false},'other');assert.equal((await call('games/'+id+'/join','DELETE',null,'other')).status,200);assert.equal((await call('games/'+id+'/requests')).data.requests.length,0);
  assert.equal((await call('games/'+id+'/join','POST',{deck_need:'own',extra_decks:false},'other')).status,200);
+});
+
+
+test('Morning and Lunch break use Singapore boundaries and all 35 weekly slots are valid',()=>{
+ for(const [utc,slot] of [['2026-10-19T21:59:00Z',null],['2026-10-19T22:00:00Z','morning'],['2026-10-20T03:59:00Z','morning'],['2026-10-20T04:00:00Z','lunch'],['2026-10-20T05:59:00Z','lunch'],['2026-10-20T06:00:00Z','afternoon']])assert.equal(singaporeSlot(new Date(utc)),slot);
+ assert.ok(preferencesValid(Array.from({length:7},(_,day)=>['morning','lunch','afternoon','evening','late'].map(slot=>({day,slot}))).flat()));
+});
+
+test('availability places have independent private schedules and preserve legacy preferences',async()=>{
+ const {call,sql}=await fixture();await call('me');sql.prepare('INSERT INTO preferences VALUES(?,?,?,?)').run('me',1,'evening',Math.floor(Date.now()/1000));
+ assert.equal((await call('preferences','PUT',{area_id:'b',preferences:[{day:2,slot:'lunch'}]})).status,400);
+ assert.equal((await call('availability/locations','POST',{area_id:'b'})).status,200);
+ assert.equal((await call('preferences','PUT',{area_id:'b',preferences:[{day:2,slot:'lunch'}]})).status,200);
+ let me=(await call('me')).data;assert.equal(me.preferences[0].slot,'evening');assert.equal(me.location_preferences.length,2);
+ assert.equal((await call('me','GET',null,'other')).data.location_preferences.length,0);
+ assert.equal((await call('condos/b/schedule')).data.cells.find(c=>c.day===2&&c.slot==='lunch').count,1);
+ await call('preferences','PUT',{area_id:'a',preferences:[{day:3,slot:'morning'}]});me=(await call('me')).data;assert.equal(me.location_preferences.length,2);assert.equal(me.preferences[0].slot,'morning');
+ assert.equal((await call('availability/locations','DELETE',{area_id:'b'},'other')).status,200);assert.equal((await call('me')).data.location_preferences.length,2);
+ await call('availability/locations','DELETE',{area_id:'b'});me=(await call('me')).data;assert.equal(me.location_preferences.length,1);assert.equal(me.location_preferences[0].area_id,'a');
+});
+
+test('multiple nearby availability places count the same player once in overall totals',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-20T04:30:00Z')});const {call,sql}=await fixture();await call('me');
+ for(const [id,lat] of [['a',1.35],['b',1.351]])sql.prepare('UPDATE areas SET latitude=?,longitude=? WHERE id=?').run(lat,103.87,id);
+ for(const area_id of ['a','b']){await call('availability/locations','POST',{area_id},'other');await call('preferences','PUT',{area_id,preferences:[{day:2,slot:'lunch'}]},'other')}
+ const d=(await call('discovery')).data;assert.equal(d.usual_total,1);assert.equal(d.groups.reduce((n,g)=>n+g.usual_count,0),2);assert.ok(!JSON.stringify(d).includes('secret-name'));
 });

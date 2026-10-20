@@ -14,5 +14,5 @@ export async function enrichGames(db,uid,rows){
  ]);
  return rows.map(g=>{const unread=notes.results.filter(n=>n.game_id===g.id);return {...g,details:locations.results.find(l=>l.id===g.id)?.details||'',unread:unread.reduce((n,x)=>n+x.n,0),unread_venue:unread.some(n=>n.kind==='venue'),unread_chat:unread.some(n=>n.kind==='message'),unread_decks:unread.some(n=>n.kind==='decks')}});
 }
-export const timeSlot=time=>Number(time.slice(0,2))>=21?'late':Number(time.slice(0,2))>=18?'evening':'afternoon';
+export const timeSlot=time=>Number(time.slice(0,2))>=21?'late':Number(time.slice(0,2))>=18?'evening':Number(time.slice(0,2))>=14?'afternoon':Number(time.slice(0,2))>=12?'lunch':'morning';
 export const validTime=time=>typeof time==='string'&&/^([01]\d|2[0-3]):[0-5]\d$/.test(time);

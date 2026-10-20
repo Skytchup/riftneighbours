@@ -22,7 +22,7 @@ export function oneMap(env) {
  }
  async function search(query){
   const q=clean(query);
-  if(q.length<3||q.length>100)throw new LocationError('Enter 3–100 characters of a condo name or postal code.');
+  if(q.length<3||q.length>100)throw new LocationError('Enter 3–100 characters of a place name or postal code.');
   const key=q.toLowerCase(),cached=queries.get(key);
   if(cached&&cached.expires>Date.now())return cached.results;
   try{
@@ -40,13 +40,14 @@ export function oneMap(env) {
    if(!Array.isArray(data.results))throw new LocationError('Location search returned an unexpected response. Please try again.');
    const results=[],seen=new Set();
    for(const row of data.results.slice(0,50)){
-    const name=clean(row.BUILDING),address=clean(row.ADDRESS),postal=/^\d{6}$/.test(row.POSTAL)?row.POSTAL:'';
-    // Search covers all buildings, not just condos. Do not turn roads/NIL
-    // entries into purported residential developments.
-    if(!name||['NIL','NA','N/A'].includes(name.toUpperCase())||name.length>100||!address||address.length>300)continue;
-    const id=(await digest(name.toUpperCase()+'|'+address.toUpperCase())).slice(0,24);
+    const building=clean(row.BUILDING),address=clean(row.ADDRESS),postal=/^\d{6}$/.test(row.POSTAL)?row.POSTAL:'';
     const latitude=Number(row.LATITUDE),longitude=Number(row.LONGITUDE);
-    const geometry=latitude>=1.1&&latitude<=1.5&&longitude>=103.5&&longitude<=104.5?{latitude,longitude}:{};
+    const hasGeometry=latitude>=1.1&&latitude<=1.5&&longitude>=103.5&&longitude<=104.5;
+    // Named public areas and HDB meeting points need not have a building name.
+    const name=building&&!['NIL','NA','N/A'].includes(building.toUpperCase())?building:hasGeometry?(clean(row.STREET_NAME)||address):'';
+    if(!name||name.length>100||!address||['NIL','NA','N/A'].includes(address.toUpperCase())||address.length>300)continue;
+    const id=(await digest(name.toUpperCase()+'|'+address.toUpperCase())).slice(0,24);
+    const geometry=hasGeometry?{latitude,longitude}:{};
     if(seen.has(id))continue;seen.add(id);results.push({id,name,address,postal,...geometry});
     if(results.length===20)break;
    }

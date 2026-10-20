@@ -17,6 +17,10 @@ export async function ensureSchema(db){
    await db.prepare('CREATE INDEX IF NOT EXISTS cancellation_user ON cancellation_notices(user_id,created_at)').run();
    await db.prepare('CREATE TABLE IF NOT EXISTS game_decks (game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,deck_key TEXT NOT NULL,legend_id TEXT,name TEXT NOT NULL,PRIMARY KEY(game_id,user_id,deck_key))').run();
    await db.prepare('CREATE INDEX IF NOT EXISTS notifications_user ON notifications(user_id,created_at)').run();
+   await db.prepare('CREATE TABLE IF NOT EXISTS availability_locations (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,area_id TEXT NOT NULL REFERENCES areas(id) ON DELETE CASCADE,PRIMARY KEY(user_id,area_id))').run();
+   await db.prepare(`CREATE TABLE IF NOT EXISTS place_preferences (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,area_id TEXT NOT NULL REFERENCES areas(id) ON DELETE CASCADE,day INTEGER NOT NULL CHECK(day BETWEEN 0 AND 6),slot TEXT NOT NULL CHECK(slot IN ('morning','lunch','afternoon','evening','late')),updated_at INTEGER NOT NULL,PRIMARY KEY(user_id,area_id,day,slot))`).run();
+   await db.prepare('CREATE INDEX IF NOT EXISTS place_preferences_area ON place_preferences(area_id,day,slot,updated_at)').run();
+   await db.prepare('CREATE VIEW IF NOT EXISTS availability_records AS SELECT user_id,area_id,day,slot,MAX(updated_at) updated_at FROM (SELECT p.user_id,u.area_id,p.day,p.slot,p.updated_at FROM preferences p JOIN users u ON u.id=p.user_id WHERE u.area_id IS NOT NULL UNION ALL SELECT user_id,area_id,day,slot,updated_at FROM place_preferences) GROUP BY user_id,area_id,day,slot').run();
    await db.prepare('CREATE INDEX IF NOT EXISTS users_area ON users(area_id)').run();
    await db.prepare('CREATE INDEX IF NOT EXISTS preferences_fresh ON preferences(user_id,updated_at)').run();
    for(const [table,columns] of Object.entries(additions)){

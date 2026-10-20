@@ -47,3 +47,9 @@ test('OneMap malformed responses and repeated authorization failures fail withou
  mock.mock.mockImplementation(async url=>String(url).includes('/getToken')?Response.json(token()):Response.json({error:'unexpected'}));
  await assert.rejects(oneMap(env()).search('garden'),/unexpected response/);
 });
+
+
+test('OneMap accepts public places without a building name when coordinates are available',async t=>{
+ t.mock.method(globalThis,'fetch',async url=>String(url).includes('/getToken')?Response.json(token()):Response.json({results:[{BUILDING:'NIL',ADDRESS:'BISHAN PARK',STREET_NAME:'BISHAN PARK',LATITUDE:'1.36',LONGITUDE:'103.84',POSTAL:'NIL'}]}));
+ const places=await oneMap(env()).search('bishan park');assert.equal(places.length,1);assert.equal(places[0].name,'BISHAN PARK');assert.equal(places[0].latitude,1.36);
+});

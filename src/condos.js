@@ -8,10 +8,10 @@ const visible=`NOT EXISTS(SELECT 1 FROM blocks b WHERE (b.user_id=? AND b.blocke
 export async function condoStats(db,uid){
  const time=Math.floor(Date.now()/1000),day=singaporeDay(singaporeDate()),slot=singaporeSlot()||'';
  return (await db.prepare(`SELECT a.*,
- SUM(CASE WHEN u.available_until>? THEN 1 ELSE 0 END) available_now,
- SUM(CASE WHEN EXISTS(SELECT 1 FROM preferences p WHERE p.user_id=u.id AND p.updated_at>?) THEN 1 ELSE 0 END) usual_people,
- SUM(CASE WHEN EXISTS(SELECT 1 FROM preferences p WHERE p.user_id=u.id AND p.day=? AND p.slot=? AND p.updated_at>?) THEN 1 ELSE 0 END) usual_now
- FROM areas a LEFT JOIN users u ON u.area_id=a.id AND ${visible}
+ SUM(CASE WHEN u.area_id=a.id AND u.available_until>? THEN 1 ELSE 0 END) available_now,
+ SUM(CASE WHEN EXISTS(SELECT 1 FROM availability_records p WHERE p.user_id=u.id AND p.area_id=a.id AND p.updated_at>?) THEN 1 ELSE 0 END) usual_people,
+ SUM(CASE WHEN EXISTS(SELECT 1 FROM availability_records p WHERE p.user_id=u.id AND p.area_id=a.id AND p.day=? AND p.slot=? AND p.updated_at>?) THEN 1 ELSE 0 END) usual_now
+ FROM areas a LEFT JOIN users u ON (u.area_id=a.id OR EXISTS(SELECT 1 FROM availability_records f WHERE f.user_id=u.id AND f.area_id=a.id AND f.updated_at>${time-86400*60})) AND ${visible}
  WHERE a.id NOT LIKE 'sg-pa-%' GROUP BY a.id`).bind(time,time-86400*60,day,slot,time-86400*60,uid,uid).all()).results;
 }
 export async function condoOverview(env,user){
@@ -36,21 +36,21 @@ export async function condoSchedule(db,user,id){
  const area=await db.prepare('SELECT * FROM areas WHERE id=?').bind(id).first();
  if(!area||id.startsWith('sg-pa-'))return null;
  const time=Math.floor(Date.now()/1000);
- const rows=(await db.prepare(`SELECT p.day,p.slot,COUNT(*) people FROM preferences p JOIN users u ON u.id=p.user_id
- WHERE u.area_id=? AND p.updated_at>? AND ${visible} GROUP BY p.day,p.slot`).bind(id,time-86400*60,user.id,user.id).all()).results;
+ const rows=(await db.prepare(`SELECT p.day,p.slot,COUNT(DISTINCT p.user_id) people FROM availability_records p JOIN users u ON u.id=p.user_id
+ WHERE p.area_id=? AND p.updated_at>? AND ${visible} GROUP BY p.day,p.slot`).bind(id,time-86400*60,user.id,user.id).all()).results;
  return {area:publicArea(area),cells:SLOTS.flatMap(slot=>Array.from({length:7},(_,day)=>({day,slot,count:Number(rows.find(r=>r.day===day&&r.slot===slot)?.people||0)})))};
 }
 export async function condoSearch(env,query){
  const rows=(await env.DB.prepare("SELECT * FROM areas WHERE id NOT LIKE 'sg-pa-%' AND (name LIKE ? ESCAPE '\\' OR postal=?) ORDER BY name LIMIT 20").bind('%'+query.replace(/[\\%_]/g,'\\$&')+'%',query).all()).results;
  let external=[],message='';
- try{external=await oneMap(env).search(query)}catch{message='OneMap search is unavailable. Showing saved condos only.'}
+ try{external=await oneMap(env).search(query)}catch{message='OneMap search is unavailable. Showing saved places only.'}
  const results=rows.map(a=>({...publicArea(a),saved:true}));
  for(const item of external){if(results.some(a=>canonical(a.name)===canonical(item.name)))continue;results.push({id:item.id,name:item.name,address:item.address,saved:false,query})}
  return {results:results.slice(0,30),message};
 }
 export async function registerCondo(env,choice){
  const found=(await oneMap(env).search(choice.query)).find(a=>a.id===choice.id);
- if(!found||found.latitude==null||found.longitude==null)throw new LocationError('Search and select a building with a map location.');
+ if(!found||found.latitude==null||found.longitude==null)throw new LocationError('Search and select a place with a map location.');
  const existing=(await env.DB.prepare("SELECT * FROM areas WHERE id NOT LIKE 'sg-pa-%'").all()).results.find(a=>canonical(a.name)===canonical(found.name)&&((a.latitude==null)||distanceKm(a,found)<0.6));
  if(existing){await locateArea(env,existing.id);return publicArea(existing)}
  const planningName=await oneMap(env).planningArea(found),planning=planningAreas.find(a=>canonical(a.name)===canonical(planningName||''));
