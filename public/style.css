@@ -156,3 +156,11 @@ header{gap:16px}nav{gap:16px}
 .loading-dot{width:12px;height:12px;border-radius:50%;background:var(--accent);animation:loading-breathe 1s ease-in-out infinite alternate}
 @keyframes loading-breathe{from{opacity:.3}to{opacity:1}}
 @media(prefers-reduced-motion:reduce){.loading-dot{animation:none}}
+
+.lobby-card{position:relative;padding-top:25px}.unread-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#ef554f;box-shadow:0 0 0 2px var(--panel);flex-shrink:0}
+.lobby-unread{position:absolute;top:13px;right:13px}
+.lobby-tools{display:flex;gap:8px;align-items:stretch;margin:18px 0 10px}.venue-preview{min-width:0;flex:1;justify-content:flex-start;text-align:left;padding:10px}.venue-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;font-size:12px}
+.lobby-icon{position:relative;width:40px;min-height:42px;padding:9px;flex-shrink:0}.lobby-icon svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linejoin:round}.lobby-icon .unread-dot{position:absolute;top:3px;right:3px;width:7px;height:7px}
+.lobby-admin{margin-top:16px;gap:6px}.lobby-admin button{font-size:11px;padding:7px 9px}.danger{color:#ffb4a8}.full-address{white-space:pre-wrap;overflow-wrap:anywhere;padding:18px;background:var(--mint);border-radius:10px}
+.lobby-deck{display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid var(--line)}.lobby-deck img{object-fit:contain}.lobby-deck small{display:block;color:var(--soft);font-size:12px}.lobby-deck-list{margin-bottom:24px}
+.deck-choices .deck-choice{display:flex;align-items:center;gap:9px}.deck-choice input{margin:0!important}.deck-choice img{object-fit:contain}

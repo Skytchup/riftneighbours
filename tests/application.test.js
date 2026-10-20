@@ -361,3 +361,50 @@ test('API responses expose server duration without including request secrets',as
  const {env}=await fixture();const response=await worker.fetch(new Request('https://example.test/api/me',{headers:{Cookie:'rn_session=me'}}),env);
  assert.match(response.headers.get('Server-Timing'),/^app;dur=[0-9.]+$/);
 });
+
+test('creator cancellation notifies accepted players after game data is deleted',async()=>{
+ const {call,sql}=await fixture();const id=(await call('games','POST',{title:'Cancelled lobby',date:singaporeDate(),start_time:'19:45',venue:'decide',deck_need:'own',extra_decks:false})).data.id;
+ for(const member of ['other','third'])await call('games/'+id+'/join','POST',{deck_need:'own',extra_decks:false},member);
+ const request=(await call('games/'+id+'/requests')).data.requests.find(r=>r.username==='other-secret-name');await call('games/'+id+'/requests','PUT',{id:request.id,status:'accepted'});
+ assert.equal((await call('games/'+id,'DELETE',null,'other')).status,403);
+ assert.equal((await call('games/'+id,'DELETE')).status,200);assert.equal(sql.prepare('SELECT count(*) n FROM games WHERE id=?').get(id).n,0);
+ const notes=(await call('notifications','GET',null,'other')).data.notifications;assert.equal(notes.length,1);assert.equal(notes[0].kind,'cancelled');assert.equal(notes[0].title,'Cancelled lobby');assert.equal(notes[0].game_id,null);
+ assert.equal((await call('notifications','GET',null,'third')).data.notifications.length,0);
+ await call('notifications/read','POST',{id:notes[0].id},'other');assert.equal((await call('notifications','GET',null,'other')).data.unread,0);
+});
+
+test('midnight Singapore cleanup deletes ended-day games but preserves the new day',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-20T15:59:00Z')});const {call,sql,env}=await fixture();
+ const body={title:'Midnight lobby',start_time:'23:00',venue:'decide',deck_need:'own',extra_decks:false};
+ const old=(await call('games','POST',{...body,date:'2026-10-20'})).data.id,next=(await call('games','POST',{...body,date:'2026-10-21'})).data.id;
+ await call('games/'+old+'/join','POST',{deck_need:'own',extra_decks:false},'other');await worker.scheduled({},env);
+ assert.equal(sql.prepare('SELECT count(*) n FROM games').get().n,2);t.mock.timers.tick(60001);await worker.scheduled({},env);
+ assert.equal(sql.prepare('SELECT count(*) n FROM games WHERE id=?').get(old).n,0);assert.equal(sql.prepare('SELECT count(*) n FROM games WHERE id=?').get(next).n,1);assert.equal(sql.prepare('SELECT count(*) n FROM requests WHERE game_id=?').get(old).n,0);
+});
+
+test('exact lobby times and selected deck snapshots validate ownership and participant visibility',async()=>{
+ const {call,sql}=await fixture();await call('me');const legend=legends[0];
+ await call('decks','PUT',{decks:[{legend_id:legend.id,custom_name:'Host deck'}]});await call('decks','PUT',{decks:[{legend_id:legend.id,custom_name:'Guest deck'}]},'other');
+ const hostDeck=(await call('me')).data.decks[0],guestDeck=(await call('me','GET',null,'other')).data.decks[0];
+ const body={title:'Exact lobby',date:singaporeDate(),start_time:'20:35',venue:'shared',details:'123456 Clubhouse',deck_need:'own',extra_decks:false,deck_ids:[hostDeck.id]};
+ assert.equal((await call('games','POST',{...body,start_time:'25:61'})).status,400);assert.equal((await call('games','POST',{...body,venue:'cafe'})).status,400);assert.equal((await call('games','POST',{...body,deck_ids:[guestDeck.id]})).status,400);
+ const created=await call('games','POST',body);assert.equal(created.status,201);const id=created.data.id;
+ assert.equal((await call('my-games')).data.games[0].start_time,'20:35');assert.equal((await call('games','GET',null,'other')).data.games[0].details,'');
+ await call('games/'+id+'/join','POST',{deck_need:'own',extra_decks:false,deck_ids:[guestDeck.id]},'other');
+ assert.equal((await call('games/'+id+'/decks')).data.decks.length,1);assert.equal((await call('games/'+id+'/decks','GET',null,'other')).status,403);
+ const request=(await call('games/'+id+'/requests')).data.requests[0];await call('games/'+id+'/requests','PUT',{id:request.id,status:'accepted'});
+ const decks=(await call('games/'+id+'/decks','GET',null,'other')).data.decks;assert.deepEqual(decks.map(d=>d.name).sort(),['Guest deck','Host deck']);assert.equal(decks.filter(d=>d.is_creator).length,1);
+ assert.equal((await call('games/'+id+'/location','GET',null,'other')).data.details,'123456 Clubhouse');
+ await call('decks','PUT',{decks:[]});assert.equal((await call('games/'+id+'/decks')).data.decks.length,2);
+ assert.equal((await call('games/'+id+'/decks','PUT',{deck_ids:[guestDeck.id]})).status,400);
+ await call('games/'+id+'/decks','PUT',{deck_ids:[]});assert.equal((await call('games/'+id+'/decks')).data.decks.length,1);
+});
+
+test('reading location notifications leaves chat unread and preserves per-game indicators',async()=>{
+ const {call}=await fixture();const id=(await call('games','POST',{title:'Unread lobby',date:singaporeDate(),start_time:'18:30',venue:'decide',deck_need:'own',extra_decks:false})).data.id;
+ await call('games/'+id+'/join','POST',{deck_need:'own',extra_decks:false},'other');const r=(await call('games/'+id+'/requests')).data.requests[0];await call('games/'+id+'/requests','PUT',{id:r.id,status:'accepted'});
+ await call('games/'+id+'/venue','PUT',{details:'New venue'});await call('games/'+id+'/messages','POST',{body:'A message'});
+ let g=(await call('my-games','GET',null,'other')).data.games[0];assert.ok(g.unread_venue);assert.ok(g.unread_chat);assert.ok(g.unread);
+ await call('notifications/read','POST',{game_id:id,kind:'venue'},'other');g=(await call('my-games','GET',null,'other')).data.games[0];assert.equal(g.unread_venue,false);assert.equal(g.unread_chat,true);
+ assert.ok((await call('notifications')).data.unread>0);await call('notifications/read','POST',{game_id:id,kind:'message'},'other');assert.equal((await call('my-games','GET',null,'other')).data.games[0].unread_chat,false);
+});

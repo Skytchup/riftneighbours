@@ -4,7 +4,7 @@ const ready=new WeakMap();
 const additions={
  users:{avatar_legend_id:'TEXT',available_until:'INTEGER NOT NULL DEFAULT 0',share_map:'INTEGER NOT NULL DEFAULT 0 CHECK(share_map IN (0,1))'},
  areas:{latitude:'REAL',longitude:'REAL',address:"TEXT NOT NULL DEFAULT ''",postal:"TEXT NOT NULL DEFAULT ''",geo_attempted_at:'INTEGER NOT NULL DEFAULT 0'},
- games:{is_full:'INTEGER NOT NULL DEFAULT 0 CHECK(is_full IN (0,1))',deck_need:"TEXT NOT NULL DEFAULT 'own' CHECK(deck_need IN ('own','need'))",extra_decks:'INTEGER NOT NULL DEFAULT 0 CHECK(extra_decks IN (0,1))'},
+ games:{start_time:"TEXT NOT NULL DEFAULT ''",is_full:'INTEGER NOT NULL DEFAULT 0 CHECK(is_full IN (0,1))',deck_need:"TEXT NOT NULL DEFAULT 'own' CHECK(deck_need IN ('own','need'))",extra_decks:'INTEGER NOT NULL DEFAULT 0 CHECK(extra_decks IN (0,1))'},
  requests:{deck_need:"TEXT NOT NULL DEFAULT 'own' CHECK(deck_need IN ('own','need'))",extra_decks:'INTEGER NOT NULL DEFAULT 0 CHECK(extra_decks IN (0,1))'},
  decks:{legend_id:'TEXT',custom_name:"TEXT NOT NULL DEFAULT ''"}
 };
@@ -13,6 +13,9 @@ export async function ensureSchema(db){
   const task=(async()=>{
    await db.prepare('CREATE TABLE IF NOT EXISTS condo_favourites (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,area_id TEXT NOT NULL REFERENCES areas(id) ON DELETE CASCADE,created_at INTEGER NOT NULL,PRIMARY KEY(user_id,area_id))').run();
    await db.prepare('CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,kind TEXT NOT NULL,body TEXT NOT NULL,created_at INTEGER NOT NULL,read_at INTEGER)').run();
+   await db.prepare('CREATE TABLE IF NOT EXISTS cancellation_notices (id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,title TEXT NOT NULL,body TEXT NOT NULL,created_at INTEGER NOT NULL,read_at INTEGER)').run();
+   await db.prepare('CREATE INDEX IF NOT EXISTS cancellation_user ON cancellation_notices(user_id,created_at)').run();
+   await db.prepare('CREATE TABLE IF NOT EXISTS game_decks (game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,deck_key TEXT NOT NULL,legend_id TEXT,name TEXT NOT NULL,PRIMARY KEY(game_id,user_id,deck_key))').run();
    await db.prepare('CREATE INDEX IF NOT EXISTS notifications_user ON notifications(user_id,created_at)').run();
    await db.prepare('CREATE INDEX IF NOT EXISTS users_area ON users(area_id)').run();
    await db.prepare('CREATE INDEX IF NOT EXISTS preferences_fresh ON preferences(user_id,updated_at)').run();

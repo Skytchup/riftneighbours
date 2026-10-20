@@ -223,3 +223,23 @@ messages. Individual OneMap network steps use 4-second timeouts; provider calls 
 location workflows rather than ordinary browsing. API responses include an `app` duration in `Server-Timing`,
 which can be inspected in browser Network tools. These changes remove known blocking paths; local tests do
 not establish actual signed-in production response times or identify every possible network failure.
+
+
+## Lobby lifecycle, details and decks
+
+Creators name a lobby, choose a date and exact Singapore start time, and choose either a venue to decide
+or a shared space. Shared space can include a free-text meeting location at creation. Profile deck IDs
+are validated server-side and copied into per-game snapshots, so later profile edits do not erase the
+lineup. Joining players select their decks; snapshots are visible to the organiser and accepted members
+only after acceptance. Members can update their own lineup from the deck control.
+
+Lobby cards have a private location preview, chat and deck controls. Red indicators are scoped to the
+game and category; reading the location does not clear chat messages. Opening the inbox no longer
+marks every game notification read. Cancellation notices can be read individually.
+
+Creators can delete a game, which atomically notifies accepted players in the in-app inbox and deletes
+the game and its related data. Cancellation notices are stored separately so they survive deletion.
+Pending applicants are not notified as participants. The cron runs at `0 16 * * *` (midnight Singapore)
+and removes games with dates before the current Singapore date, plus expired sessions/confirmations.
+Expired games are also filtered from game lists, without waiting for the scheduled cleanup to finish.
+Schema additions are installed by `ensureSchema`; no manual database migration is needed for this release.

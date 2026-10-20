@@ -27,11 +27,11 @@ export async function showNearby(o){
  ${needsLocation?'<p class="map-note">Choose your condo using OneMap in <a href="#profile">Profile</a> to centre the map and search by distance. Without a condo location, results stay within your neighbourhood.</p>':''}
  ${data.unmapped?'<p class="map-note">Some players do not yet have a map location.</p>':''}
  <p class="compact muted">${data.slot?'Amber matches the current '+esc(data.slot)+' slot in saved schedules.':'There is no scheduled slot before 2 pm; only Ready to Play appears.'} Scheduled availability is a preference, not a confirmation. Counts include you.</p>
- <div class="row between section games-heading"><h2>Nearby games</h2><button class="primary" id="suggest">Suggest a game +</button></div><div id="nearby-games-list"><p class="map-note" role="status">Loading games…</p></div>`;
- function gamesMarkup(games,gamesError){return `${gamesError?`<p class="notice">${esc(gamesError)}</p>`:games.length?`<div class="grid">${games.map(g=>`<article class="card"><span class="tag">${g.venue==='decide'?'Venue to decide':g.venue==='shared'?'Shared space offered':'Café suggested'}</span><h3>${esc(g.title)}</h3><p>${esc(g.date)} · ${esc(g.slot)}</p>${o.deckTags(g)}<p class="compact">${g.participant_count??1} player${(g.participant_count??1)===1?'':'s'}${g.is_full?' · Event full':''}</p><button class="full" data-join="${esc(g.id)}" ${g.user_id!==state.user.id&&(g.request_status==='pending'||(g.is_full&&g.request_status!=='accepted'))?'disabled':''}>${g.user_id===state.user.id?'Manage game':g.request_status==='accepted'?'Joined':g.request_status==='pending'?'Pending request':g.is_full?'Event full':'Ask to join'}</button></article>`).join('')}</div>`:'<div class="empty"><p>No games yet. Suggest a time and find a table together.</p></div>'}`}
+ <div class="row between section games-heading"><h2>Nearby games</h2><button class="primary" id="suggest">Create a Game</button></div><div id="nearby-games-list"><p class="map-note" role="status">Loading games…</p></div>`;
+ function gamesMarkup(games,error){return error?'<p class="notice">'+esc(error)+'</p>':games.length?'<div class="grid">'+games.map(o.lobbyCard).join('')+'</div>':'<div class="empty"><p>No games yet. Create a lobby and find a table together.</p></div>'}
  gamesPromise.then(result=>{
   if(!valid())return;const games=result.games||[];o.onGames(games);const list=app.querySelector('#nearby-games-list');if(!list)return;
-  list.innerHTML=gamesMarkup(games,result.error);list.querySelectorAll('[data-join]').forEach(button=>button.onclick=()=>o.onJoin(button.dataset.join));
+  list.innerHTML=gamesMarkup(games,result.error);o.bindCards(list);
  });
  function draw(){
   const groups=visibleGroups(data,app.querySelector('#map-filter').value),list=app.querySelector('#player-list');
