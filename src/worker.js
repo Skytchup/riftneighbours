@@ -226,6 +226,15 @@ async function handle(req,env){
    if(req.method==='GET')return json({decks:(await db.prepare(`SELECT d.user_id,d.deck_key,d.legend_id,d.name,u.username,(d.user_id=?) is_creator FROM game_decks d JOIN users u ON u.id=d.user_id WHERE d.game_id=? AND (d.user_id=? OR EXISTS(SELECT 1 FROM requests r WHERE r.game_id=d.game_id AND r.user_id=d.user_id AND r.status='accepted')) ORDER BY u.username,d.name`).bind(game.user_id,id,game.user_id).all()).results});
    if(req.method==='PUT'){const b=await read(),decks=await selectedDecks(db,uid,b.deck_ids);if(!decks||(b.deck_need==='need'&&decks.length))return json({error:'Select your own decks, or request a borrowed deck.'},400);await db.batch([...saveLobbyDecks(db,id,uid,decks),notify(db,id,uid,'decks','The decks for your game changed.')]);return json({ok:true})}
   }
+  if(action==='join'&&req.method==='DELETE'){
+   if(owner||!request)return json({error:owner?'Organisers can delete the game instead.':'You are not part of this game.'},400);
+   await db.batch([
+    ...(request.status==='accepted'?[notify(db,id,uid,'join_request','A player left your game.',true)]:[]),
+    db.prepare('DELETE FROM game_decks WHERE game_id=? AND user_id=?').bind(id,uid),
+    db.prepare('DELETE FROM requests WHERE game_id=? AND user_id=?').bind(id,uid),
+    db.prepare('DELETE FROM notifications WHERE game_id=? AND user_id=?').bind(id,uid)
+   ]);return json({ok:true});
+  }
   if(action==='full'&&owner&&req.method==='PUT'){const b=await read();if(typeof b.is_full!=='boolean')return json({error:'Choose a valid event status'},400);await db.prepare('UPDATE games SET is_full=? WHERE id=?').bind(b.is_full?1:0,id).run();return json({ok:true,is_full:b.is_full})}
   if(action==='join'&&req.method==='POST'){
    const allowed=await db.prepare('SELECT 1 FROM areas a JOIN areas b ON a.neighbourhood=b.neighbourhood WHERE a.id=? AND b.id=?').bind(user.area_id,game.area_id).first();if(!allowed||owner||game.date<singaporeDate())return json({error:'Cannot join this game'},400);

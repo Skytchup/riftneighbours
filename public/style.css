@@ -199,3 +199,7 @@ header{gap:16px}nav{gap:16px}
 @media(hover:hover) and (pointer:fine){.rift-presence:not(:disabled):hover{background:#85343c;border-color:#d68882}.rift-presence.is-active:not(:disabled):hover{background:#287454;border-color:#9aceb0}}
 @media(max-width:1100px){.rift-presence{width:auto;flex-basis:auto;margin:0 auto;order:3}.kopi-button{margin-left:0}}
 @media(max-width:560px){.brand .sg{display:inline}.rift-presence{min-width:0;padding:9px 14px}.rift-presence strong{font-size:13px}.kopi-button{width:34px;height:34px;font-size:19px}}
+
+.lobby-tools{flex-wrap:nowrap;justify-content:flex-start;gap:9px}
+.lobby-tools .lobby-icon{width:42px;height:42px;min-height:42px;padding:9px;flex:0 0 42px}
+.lobby-admin .text-button{padding:7px 0;text-decoration:underline;text-underline-offset:3px}

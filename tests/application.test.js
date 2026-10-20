@@ -408,3 +408,22 @@ test('reading location notifications leaves chat unread and preserves per-game i
  await call('notifications/read','POST',{game_id:id,kind:'venue'},'other');g=(await call('my-games','GET',null,'other')).data.games[0];assert.equal(g.unread_venue,false);assert.equal(g.unread_chat,true);
  assert.ok((await call('notifications')).data.unread>0);await call('notifications/read','POST',{game_id:id,kind:'message'},'other');assert.equal((await call('my-games','GET',null,'other')).data.games[0].unread_chat,false);
 });
+
+test('leaving removes only your membership and decks, updates counts and revokes private access',async()=>{
+ const {call,sql}=await fixture();await call('me');const id=(await call('games','POST',{title:'Leave test',date:singaporeDate(),start_time:'20:00',venue:'decide',deck_need:'own',extra_decks:false})).data.id;
+ await call('games/'+id+'/join','POST',{deck_need:'own',extra_decks:false},'other');const r=(await call('games/'+id+'/requests')).data.requests[0];await call('games/'+id+'/requests','PUT',{id:r.id,status:'accepted'});
+ sql.prepare('INSERT INTO game_decks VALUES(?,?,?,?,?)').run(id,'other','snapshot',legends[0].id,'Guest deck');
+ await call('games/'+id+'/venue','PUT',{details:'Private venue'});
+ assert.equal((await call('games/'+id+'/join','DELETE',null,'me')).status,400);assert.equal((await call('games/'+id+'/join','DELETE',null,'third')).status,400);assert.equal((await call('games/'+id+'/join','DELETE',null,'invalid')).status,401);
+ assert.equal((await call('games/'+id+'/join','DELETE',null,'other')).status,200);
+ assert.equal(sql.prepare('SELECT count(*) n FROM games WHERE id=?').get(id).n,1);assert.equal(sql.prepare('SELECT count(*) n FROM game_decks WHERE game_id=? AND user_id=?').get(id,'other').n,0);
+ assert.equal((await call('my-games','GET',null,'other')).data.games.length,0);assert.equal((await call('games')).data.games[0].participant_count,1);
+ assert.equal((await call('games/'+id+'/location','GET',null,'other')).status,403);assert.equal((await call('games/'+id+'/messages','GET',null,'other')).status,403);assert.equal((await call('games/'+id+'/decks','GET',null,'other')).status,403);
+ assert.equal((await call('notifications','GET',null,'other')).data.notifications.length,0);assert.ok((await call('notifications')).data.notifications.some(n=>n.body==='A player left your game.'));
+});
+
+test('pending players can withdraw their request without deleting the game',async()=>{
+ const {call}=await fixture();const id=(await call('games','POST',{title:'Withdraw',date:singaporeDate(),start_time:'20:00',venue:'decide',deck_need:'own',extra_decks:false})).data.id;
+ await call('games/'+id+'/join','POST',{deck_need:'own',extra_decks:false},'other');assert.equal((await call('games/'+id+'/join','DELETE',null,'other')).status,200);assert.equal((await call('games/'+id+'/requests')).data.requests.length,0);
+ assert.equal((await call('games/'+id+'/join','POST',{deck_need:'own',extra_decks:false},'other')).status,200);
+});
