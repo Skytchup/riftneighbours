@@ -453,3 +453,14 @@ test('multiple nearby availability places count the same player once in overall 
  for(const area_id of ['a','b']){await call('availability/locations','POST',{area_id},'other');await call('preferences','PUT',{area_id,preferences:[{day:2,slot:'lunch'}]},'other')}
  const d=(await call('discovery')).data;assert.equal(d.usual_total,1);assert.equal(d.groups.reduce((n,g)=>n+g.usual_count,0),2);assert.ok(!JSON.stringify(d).includes('secret-name'));
 });
+
+test('top-bar place moves ready counts and map centre without changing profile or schedules',async()=>{
+ const {call,sql}=await fixture();await call('me');for(const [id,lat] of [['a',1.35],['b',1.351]])sql.prepare('UPDATE areas SET latitude=?,longitude=? WHERE id=?').run(lat,103.87,id);
+ await call('preferences','PUT',{preferences:[{day:1,slot:'morning'}]});await call('presence','PUT',{available:true});const expiry=(await call('me')).data.user.available_until;
+ const changed=await call('presence','PUT',{area_id:'b'});assert.equal(changed.status,200);assert.equal(changed.data.available_until,expiry);
+ const me=(await call('me')).data;assert.equal(me.user.area_id,'a');assert.equal(me.user.presence_area_id,'b');assert.equal(me.location_preferences[0].area_id,'a');
+ assert.equal((await call('discovery')).data.home.name,'Other estate');const others=(await call('discovery','GET',null,'other')).data;assert.equal(others.groups.find(g=>g.id==='b').ready_count,1);assert.equal(others.groups.find(g=>g.id==='a')?.ready_count||0,0);
+ const places=(await call('condos','GET',null,'other')).data;assert.equal(places.favourites.find(p=>p.id==='a').available_now,0);
+ await call('presence','PUT',{available:false});assert.equal((await call('discovery','GET',null,'other')).data.ready_total,0);
+ assert.equal((await call('presence','PUT',{area_id:'forged'})).status,400);assert.equal((await call('me')).data.user.presence_area_id,'b');
+});

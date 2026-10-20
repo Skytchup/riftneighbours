@@ -206,3 +206,5 @@ header{gap:16px}nav{gap:16px}
 
 .availability-place-controls{align-items:flex-end;gap:12px}.availability-place-controls label{flex:1;min-width:180px;margin:0}.availability-place-controls button{margin-bottom:0}.form>.schedule{grid-template-columns:105px repeat(7,minmax(0,1fr))}.form>.schedule .slotlabel{line-height:1.45}
 @media(max-width:560px){.availability-place-controls label{width:100%;flex-basis:100%}.form>.schedule{grid-template-columns:76px repeat(7,minmax(0,1fr));gap:3px}.form>.schedule .slotlabel{font-size:11px}}
+
+#presence-place{width:auto;max-width:230px;min-width:110px;margin:0;padding:9px 28px 9px 10px;font-size:.8rem;background-color:#10263a;border:1px solid #8c7547;color:#f1e8d4;border-radius:6px}#presence-place[hidden]{display:none}@media(max-width:600px){#presence-place{max-width:170px;flex:1}}

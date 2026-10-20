@@ -24,19 +24,20 @@ export async function locateArea(env,id){
 }
 export async function discover(env,user,{scope='area',radius=5}={}){
  const time=Math.floor(Date.now()/1000),slot=singaporeSlot(),today=singaporeDate();
- const home=await env.DB.prepare('SELECT * FROM areas WHERE id=?').bind(user.area_id).first();
+ const selectedArea=user.presence_area_id||user.area_id;
+ const home=await env.DB.prepare('SELECT * FROM areas WHERE id=?').bind(selectedArea).first();
  if(!home)return {groups:[],home:null,slot,date:today,radius};
- const ownSchedule=slot&&await env.DB.prepare('SELECT 1 FROM availability_records WHERE user_id=? AND area_id=? AND day=? AND slot=? AND updated_at>?').bind(user.id,user.area_id,singaporeDay(today),slot,time-86400*60).first();
+ const ownSchedule=slot&&await env.DB.prepare('SELECT 1 FROM availability_records WHERE user_id=? AND area_id=? AND day=? AND slot=? AND updated_at>?').bind(user.id,selectedArea,singaporeDay(today),slot,time-86400*60).first();
  const self_status=user.available_until>time?'now':ownSchedule?'usual':null;
- const rows=(await env.DB.prepare(`WITH candidates AS (SELECT id user_id,area_id FROM users WHERE area_id IS NOT NULL UNION SELECT user_id,area_id FROM availability_records WHERE day=? AND slot=? AND updated_at>?) SELECT u.id,CASE WHEN a.id=u.area_id THEN u.available_until ELSE 0 END available_until,a.id area_id,a.name,a.neighbourhood,a.latitude,a.longitude,a.address,
+ const rows=(await env.DB.prepare(`WITH candidates AS (SELECT id user_id,COALESCE(presence_area_id,area_id) area_id FROM users WHERE COALESCE(presence_area_id,area_id) IS NOT NULL UNION SELECT user_id,area_id FROM availability_records WHERE day=? AND slot=? AND updated_at>?) SELECT u.id,CASE WHEN a.id=COALESCE(u.presence_area_id,u.area_id) THEN u.available_until ELSE 0 END available_until,a.id area_id,a.name,a.neighbourhood,a.latitude,a.longitude,a.address,
  EXISTS(SELECT 1 FROM availability_records f WHERE f.user_id=u.id AND f.area_id=a.id AND f.day=? AND f.slot=? AND f.updated_at>?) usual
  FROM candidates c JOIN users u ON u.id=c.user_id JOIN areas a ON a.id=c.area_id
- WHERE u.id!=? AND (a.id=u.area_id AND u.available_until>? OR EXISTS(SELECT 1 FROM availability_records f WHERE f.user_id=u.id AND f.area_id=a.id AND f.day=? AND f.slot=? AND f.updated_at>?))
+ WHERE u.id!=? AND (a.id=COALESCE(u.presence_area_id,u.area_id) AND u.available_until>? OR EXISTS(SELECT 1 FROM availability_records f WHERE f.user_id=u.id AND f.area_id=a.id AND f.day=? AND f.slot=? AND f.updated_at>?))
  AND NOT EXISTS(SELECT 1 FROM blocks b WHERE (b.user_id=? AND b.blocked_id=u.id) OR (b.user_id=u.id AND b.blocked_id=?))
  ORDER BY a.id,u.id`).bind(singaporeDay(today),slot||'',time-86400*60,singaporeDay(today),slot||'',time-86400*60,user.id,time,singaporeDay(today),slot||'',time-86400*60,user.id,user.id).all()).results;
  const centered=home.latitude!=null&&home.longitude!=null,groups=new Map(),readyPeople=new Set(),usualPeople=new Set();let unmapped=0;
  for(const row of rows){
-  if(scope==='condo'&&row.area_id!==user.area_id)continue;
+  if(scope==='condo'&&row.area_id!==selectedArea)continue;
   const mapped=row.latitude!=null&&row.longitude!=null;
   const distance=mapped&&centered?distanceKm(home,row):null;
   if(centered&&mapped&&distance>radius)continue;

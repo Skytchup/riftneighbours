@@ -64,7 +64,7 @@ async function handle(req,env){
  if(!user)return json({error:'Please sign in'},401);
  const db=env.DB,uid=user.id;
  await ensureSchema(db);
- Object.assign(user,await db.prepare('SELECT available_until,share_map,avatar_legend_id FROM users WHERE id=?').bind(uid).first());
+ Object.assign(user,await db.prepare('SELECT presence_area_id,available_until,share_map,avatar_legend_id FROM users WHERE id=?').bind(uid).first());
  if(p==='/api/notifications'&&req.method==='GET'){
   const notifications=(await db.prepare(`SELECT n.id,n.game_id,n.kind,n.body,n.created_at,n.read_at,g.title FROM notifications n JOIN games g ON g.id=n.game_id WHERE n.user_id=?
   UNION ALL SELECT id,NULL game_id,'cancelled' kind,body,created_at,read_at,title FROM cancellation_notices WHERE user_id=? ORDER BY created_at DESC,id DESC LIMIT 50`).bind(uid,uid).all()).results;
@@ -82,13 +82,15 @@ async function handle(req,env){
  if(p==='/api/presence'&&req.method==='PUT'){
   const b=await readPresence(req);
   if(!user.area_id)return json({error:'Choose your location in Profile first.'},400);
-  if(typeof b.available!=='boolean'&&typeof b.share_map!=='boolean')return json({error:'Choose your availability or map visibility.'},400);
+  if(typeof b.available!=='boolean'&&typeof b.share_map!=='boolean'&&typeof b.area_id!=='string')return json({error:'Choose your availability or map visibility.'},400);
   if(b.share_map===true&&user.area_id.startsWith('sg-pa-'))return json({error:'Select your selected place in Profile before sharing your map location.'},400);
+  const placeId=b.area_id??user.presence_area_id??user.area_id;
+  if(!text(placeId,100)||!await db.prepare('SELECT id FROM areas WHERE id=?').bind(placeId).first())return json({error:'Choose a saved place.'},400);
   const until=typeof b.available==='boolean'?(b.available?now()+7200:0):user.available_until;
   const sharing=typeof b.share_map==='boolean'?(b.share_map?1:0):user.share_map;
-  await db.prepare('UPDATE users SET available_until=?,share_map=? WHERE id=?').bind(until,sharing,uid).run();
-  if(sharing)await locateArea(env,user.area_id);
-  return json({available_until:until,share_map:sharing});
+  await db.prepare('UPDATE users SET available_until=?,share_map=?,presence_area_id=? WHERE id=?').bind(until,sharing,placeId,uid).run();
+  if(sharing)await locateArea(env,placeId);
+  return json({available_until:until,share_map:sharing,presence_area_id:placeId});
  }
  if(p==='/api/discovery'&&req.method==='GET'){
   if(!user.area_id)return json({error:'Choose your location in Profile first.'},400);

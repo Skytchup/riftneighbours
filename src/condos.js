@@ -8,10 +8,10 @@ const visible=`NOT EXISTS(SELECT 1 FROM blocks b WHERE (b.user_id=? AND b.blocke
 export async function condoStats(db,uid){
  const time=Math.floor(Date.now()/1000),day=singaporeDay(singaporeDate()),slot=singaporeSlot()||'';
  return (await db.prepare(`SELECT a.*,
- SUM(CASE WHEN u.area_id=a.id AND u.available_until>? THEN 1 ELSE 0 END) available_now,
+ SUM(CASE WHEN COALESCE(u.presence_area_id,u.area_id)=a.id AND u.available_until>? THEN 1 ELSE 0 END) available_now,
  SUM(CASE WHEN EXISTS(SELECT 1 FROM availability_records p WHERE p.user_id=u.id AND p.area_id=a.id AND p.updated_at>?) THEN 1 ELSE 0 END) usual_people,
  SUM(CASE WHEN EXISTS(SELECT 1 FROM availability_records p WHERE p.user_id=u.id AND p.area_id=a.id AND p.day=? AND p.slot=? AND p.updated_at>?) THEN 1 ELSE 0 END) usual_now
- FROM areas a LEFT JOIN users u ON (u.area_id=a.id OR EXISTS(SELECT 1 FROM availability_records f WHERE f.user_id=u.id AND f.area_id=a.id AND f.updated_at>${time-86400*60})) AND ${visible}
+ FROM areas a LEFT JOIN users u ON (COALESCE(u.presence_area_id,u.area_id)=a.id OR EXISTS(SELECT 1 FROM availability_records f WHERE f.user_id=u.id AND f.area_id=a.id AND f.updated_at>${time-86400*60})) AND ${visible}
  WHERE a.id NOT LIKE 'sg-pa-%' GROUP BY a.id`).bind(time,time-86400*60,day,slot,time-86400*60,uid,uid).all()).results;
 }
 export async function condoOverview(env,user){
