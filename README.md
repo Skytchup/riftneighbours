@@ -171,3 +171,27 @@ The condo tab is separate from the neighbourhood map. Search combines registered
 Selecting a condo returns an anonymous 7-day × 3-slot timetable of exact aggregate counts. Only members who opted into condo aggregate counts contribute to this full weekly grid; map-only consent does not disclose weekly patterns. Counts include the viewer when opted in, exclude mutually blocked accounts, and ignore schedules older than 60 days. No usernames, user IDs or individual timetable rows are returned by the condo endpoints.
 
 Nearby recommendations consider registered condos with shared availability and known coordinates, prefilter within 1.5 km, route up to 12 candidates using OneMap walking routes, and show up to six within 15 minutes. Available Now counts rank first; the fallback order is the number of distinct neighbours with any fresh usual availability, then walk duration. Active counts use map or condo aggregate consent. Failed routing uses a labelled approximation (straight-line distance × 1.3 detour at 80 m/min), still applying the 15-minute threshold. Routing results cache for one hour; failures cache for five minutes. No nearby recommendation is invented for unknown coordinates. Migration 0005 and the runtime schema bridge initialize favourites.
+
+
+## Registration: invite-only or public
+
+Registration stays invite-only unless the Worker variable `PUBLIC_SIGNUP` is set to the exact string `true`.
+To test more accounts without opening registration, add their comma-separated addresses to the existing
+`PILOT_EMAILS` secret. No code change is needed.
+
+For public registration, set `PUBLIC_SIGNUP=true` in the Cloudflare Worker configuration and deploy/apply
+that configuration. Any Google identity with a verified email can then create an account; Google Workspace
+admins may still block external apps. To return to invite-only, remove the variable or set it to `false`.
+This controls new sign-ins; it does not revoke existing sessions.
+
+The app requests only `openid email`. Review Google Auth Platform > Audience (External/production settings)
+and Branding (support contact and public privacy URL) before a broader launch. Google documents an allowlist
+exception for basic identity scopes; do not assume every testing-mode login needs a Google test-user entry.
+
+Signed-out visitors see only the introduction and Google account button, plus public privacy/about pages.
+Member navigation starts hidden in HTML. Community APIs require a server-validated session; hiding controls
+is not the access-control mechanism. The public landing has no demo entry.
+
+Public signup does not establish residency or prevent a signed-in person from browsing without playing.
+Before a broad promotion, finalize the privacy contact/retention notice and configure durable edge rate limits.
+Current location-search throttling is in-memory and is not a global anti-scraping limit.

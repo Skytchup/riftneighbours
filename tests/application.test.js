@@ -299,3 +299,24 @@ test('game starts without a venue; only accepted participants read messages and 
 test('blocking prevents game access and account deletion cascades',async()=>{const {sql,call}=await fixture();const id=(await call('games','POST',{title:'Hi',date:singaporeDate(),slot:'late',venue:'decide',deck_need:'own',extra_decks:true})).data.id;await call('blocks','POST',{user_id:'other'});assert.equal((await call('games/'+id+'/join','POST',{deck_need:'need',extra_decks:false},'other')).status,404);await call('account','DELETE');assert.equal(sql.prepare('SELECT count(*) n FROM users WHERE id=?').get('me').n,0);assert.equal(sql.prepare('SELECT count(*) n FROM games').get().n,0);assert.equal((await call('me')).status,401)});
 
 test('deck needs are game-specific and cannot contradict extra-deck offers',async()=>{const {call}=await fixture();const data={title:'Borrow a deck',date:singaporeDate(),slot:'evening',venue:'decide',deck_need:'need',extra_decks:false};assert.equal((await call('games','POST',{...data,extra_decks:true})).status,400);const id=(await call('games','POST',data)).data.id;assert.equal((await call('games/'+id+'/join','POST',{deck_need:'own',extra_decks:true},'other')).status,200);const request=(await call('games/'+id+'/requests')).data.requests[0];assert.equal(request.deck_need,'own');assert.equal(request.extra_decks,1);await call('games/'+id+'/requests','PUT',{id:request.id,status:'accepted'});await call('games/'+id+'/join','POST',{deck_need:'need',extra_decks:false},'other');const updated=(await call('games/'+id+'/requests')).data.requests[0];assert.equal(updated.status,'accepted');assert.equal(updated.deck_need,'need');assert.equal((await call('games/'+id+'/join','POST',{deck_need:'need',extra_decks:true},'third')).status,400)});
+
+test('public registration requires an explicit flag and a Google-verified email',async t=>{
+ const {env,sql}=await fixture();let identity={sub:'public-user',email:'new@example.test',email_verified:true};
+ t.mock.method(globalThis,'fetch',async url=>Response.json(String(url).includes('/token')?{access_token:'google-token'}:identity));
+ const signIn=()=>worker.fetch(new Request('https://example.test/auth/callback?state=expected&code=test',{headers:{Cookie:'oauth_state=expected'}}),env);
+ env.PUBLIC_SIGNUP='false';env.PILOT_EMAILS='invited@example.test';
+ assert.equal((await signIn()).headers.get('location'),'/?signin=invite');
+ env.PUBLIC_SIGNUP='true';delete env.PILOT_EMAILS;
+ assert.equal((await signIn()).headers.get('location'),'https://example.test/?welcome=1#profile');
+ assert.equal(sql.prepare('SELECT count(*) n FROM users WHERE google_sub=?').get('public-user').n,1);
+ for(const invalid of [false,'true',undefined]){identity={sub:'unverified-user',email:'new@example.test',email_verified:invalid};assert.equal((await signIn()).headers.get('location'),'/?signin=invite')}
+ assert.equal(sql.prepare('SELECT count(*) n FROM users WHERE google_sub=?').get('unverified-user').n,0);
+});
+
+test('public registration never allows anonymous community reads or writes',async()=>{
+ const {env,call}=await fixture();env.PUBLIC_SIGNUP='true';
+ for(const path of ['discovery','condos','condos/a/schedule','condos/search?q=test','locations?q=test','me','games','my-games','nearby']){
+  assert.equal((await call(path,'GET',null,'invalid')).status,401,path);
+ }
+ assert.equal((await call('presence','PUT',{available:true},'invalid')).status,401);
+});

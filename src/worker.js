@@ -21,7 +21,8 @@ export default {async scheduled(event,env){if(env.DB)await env.DB.batch([env.DB.
 async function handle(req,env){
  const url=new URL(req.url),p=url.pathname;
  if(!p.startsWith('/api/')&&!p.startsWith('/auth/'))return env.ASSETS.fetch(req);
- const configured=Boolean(env.DB&&env.GOOGLE_CLIENT_ID&&env.GOOGLE_CLIENT_SECRET&&((env.PILOT_GOOGLE_SUBS||'').trim()||(env.PILOT_EMAILS||'').trim()));
+ const publicSignup=env.PUBLIC_SIGNUP==='true';
+ const configured=Boolean(env.DB&&env.GOOGLE_CLIENT_ID&&env.GOOGLE_CLIENT_SECRET&&(publicSignup||(env.PILOT_GOOGLE_SUBS||'').trim()||(env.PILOT_EMAILS||'').trim()));
  if(p==='/api/status'&&req.method==='GET')return json({loginAvailable:configured});
  const authFailure=reason=>new Response(null,{status:302,headers:{location:'/?signin='+reason,'set-cookie':cookie('oauth_state','',0),'cache-control':'no-store'}});
  if(p.startsWith('/auth/')&&req.method!=='GET')return json({error:'Method not allowed'},405,{Allow:'GET'});
@@ -44,7 +45,8 @@ async function handle(req,env){
   const g=await fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{Authorization:'Bearer '+token.access_token}});const identity=await g.json();if(!g.ok||typeof identity.sub!=='string'||!identity.sub)return authFailure('failed');
   const invitedSubject=(env.PILOT_GOOGLE_SUBS||'').split(',').map(x=>x.trim()).filter(Boolean).includes(identity.sub);
   const invitedEmail=identity.email_verified===true&&typeof identity.email==='string'&&(env.PILOT_EMAILS||'').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean).includes(identity.email.trim().toLowerCase());
-  if(!invitedSubject&&!invitedEmail)return authFailure('invite');
+  const publicIdentity=publicSignup&&identity.email_verified===true&&typeof identity.email==='string'&&identity.email.trim().length>0;
+  if(!publicIdentity&&!invitedSubject&&!invitedEmail)return authFailure('invite');
   await env.DB.prepare('INSERT INTO users(id,google_sub,username,created_at) VALUES(?,?,?,?) ON CONFLICT(google_sub) DO NOTHING').bind(crypto.randomUUID(),identity.sub,'New neighbour',now()).run();
   const user=await env.DB.prepare('SELECT id,area_id FROM users WHERE google_sub=?').bind(identity.sub).first();
   const session=crypto.randomUUID()+crypto.randomUUID();await env.DB.prepare('INSERT INTO sessions VALUES(?,?,?)').bind(await hash(session),user.id,now()+86400*14).run();
