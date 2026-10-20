@@ -58,7 +58,7 @@ async function handle(req,env){
   await env.DB.prepare('INSERT INTO users(id,google_sub,username,created_at) VALUES(?,?,?,?) ON CONFLICT(google_sub) DO NOTHING').bind(crypto.randomUUID(),identity.sub,'New neighbour',now()).run();
   const user=await env.DB.prepare('SELECT id,area_id FROM users WHERE google_sub=?').bind(identity.sub).first();
   const session=crypto.randomUUID()+crypto.randomUUID();await env.DB.prepare('INSERT INTO sessions VALUES(?,?,?)').bind(await hash(session),user.id,now()+86400*14).run();
-  const headers=new Headers({location:origin+(user.area_id?'/#nearby':'/?welcome=1#profile'),'cache-control':'no-store'});headers.append('set-cookie',cookie('rn_session',session,86400*14));headers.append('set-cookie',cookie('oauth_state','',0));return new Response(null,{status:302,headers});
+  const headers=new Headers({location:origin+(user.area_id?'/#home':'/?welcome=1#profile'),'cache-control':'no-store'});headers.append('set-cookie',cookie('rn_session',session,86400*14));headers.append('set-cookie',cookie('oauth_state','',0));return new Response(null,{status:302,headers});
  }
  const user=await env.DB.prepare('SELECT u.id,u.username,u.area_id,u.style,u.share_condo FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=? AND s.expires_at>?').bind(await hash(cookies(req).rn_session||''),now()).first();
  if(!user)return json({error:'Please sign in'},401);

@@ -202,7 +202,7 @@ test('Google login persists one account, restores its profile, and issues revoca
  assert.equal(sql.prepare('SELECT count(*) n FROM sessions WHERE token_hash=?').get(await digest(rawToken)).n,1);
  const call=(path,method='GET',body)=>worker.fetch(new Request('https://example.test/api/'+path,{method,headers:{Cookie:sessionCookie,Origin:env.APP_ORIGIN},body:body?JSON.stringify(body):undefined}),env);
  assert.equal((await call('profile','PUT',{username:'Neighbour',area_id:'b',style:'learning',share_condo:true})).status,200);
- const second=await signIn();assert.equal(second.headers.get('location'),'https://example.test/#nearby');
+ const second=await signIn();assert.equal(second.headers.get('location'),'https://example.test/#home');
  assert.equal(sql.prepare('SELECT count(*) n FROM users WHERE google_sub=?').get('invited').n,1);
  const restored=await (await call('me')).json();assert.equal(restored.user.username,'Neighbour');assert.equal(restored.user.area_id,'b');
  assert.equal(restored.user.google_sub,undefined);
