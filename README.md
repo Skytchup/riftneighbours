@@ -195,3 +195,16 @@ is not the access-control mechanism. The public landing has no demo entry.
 Public signup does not establish residency or prevent a signed-in person from browsing without playing.
 Before a broad promotion, finalize the privacy contact/retention notice and configure durable edge rate limits.
 Current location-search throttling is in-memory and is not a global anti-scraping limit.
+
+## Game interactions and notifications
+
+- Game cards expose the signed-in member's pending/joined state and accepted-player count, including the organiser.
+- Organisers can mark a game full or reopen it. The API rejects new joins and new acceptances while full.
+- Message organiser badges are derived from immutable user IDs, never matching display names.
+- Notifications are stored in D1 and shown in the signed-in inbox. Join requests notify the organiser;
+  messages and venue changes notify the other accepted participants. Acceptance/decline also notifies the applicant.
+  This is in-app delivery, not email or browser push. The inbox polls every 30 seconds while the page is visible.
+- `ensureSchema` installs the additive `games.is_full` column and notifications table/index automatically.
+- New condo names must come from a server-validated OneMap result. Existing profiles remain usable;
+  this change does not merge duplicate condo records that already exist.
+- Main navigation is Play Nearby, Search Postal Code and My availability. My account contains My games and Profile & decks.

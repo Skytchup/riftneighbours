@@ -257,23 +257,10 @@ test('empty catalogues offer all 55 planning areas and neighbourhood-only profil
  assert.equal((await call('profile','PUT',{...body,area_id:'sg-pa-fake'})).status,400);
 });
 
-test('self-declared condos persist, normalize within a planning area and support neighbourhood discovery',async()=>{
- const {sql,call}=await fixture();
- const body={username:'Alex',style:'learning',area_id:'sg-pa-bedok',condo_name:' Example   Gardens ',share_condo:true};
- const saved=await call('profile','PUT',body);assert.equal(saved.status,200);
- assert.equal(saved.data.area.name,'Example Gardens');assert.equal(saved.data.area.neighbourhood,'Bedok');
- const id=saved.data.area.id;
- assert.equal((await call('profile','PUT',{...body,condo_name:'EXAMPLE GARDENS'},'other')).data.area.id,id);
- assert.equal(sql.prepare('SELECT count(*) n FROM areas WHERE id=?').get(id).n,1);
- const restored=(await call('me')).data;
- assert.equal(restored.user.area_id,id);assert.equal(restored.user.share_condo,1);
- assert.ok(restored.areas.some(a=>a.id===id&&a.kind==='condo'));
- await call('tonight','PUT',{slot:'evening',available:true},'other');
- assert.equal((await call('nearby')).data.counts.find(c=>c.slot==='evening').confirmed,'1–2');
- assert.equal((await call('nearby?scope=condo')).data.counts.find(c=>c.slot==='evening').confirmed,'1–2');
- assert.notEqual((await call('profile','PUT',{...body,area_id:'sg-pa-tampines'},'third')).data.area.id,id);
- const invalid=await call('profile','PUT',{...body,condo_name:'x'.repeat(101)});assert.equal(invalid.status,400);
- assert.equal((await call('me')).data.user.area_id,id);
+test('manual condo names cannot create or rename developments',async()=>{
+ const {sql,call}=await fixture();const before=sql.prepare('SELECT count(*) n FROM areas').get().n;
+ const response=await call('profile','PUT',{username:'Alex',style:'casual',area_id:'sg-pa-bedok',condo_name:'Fake New Condo',share_condo:true});
+ assert.equal(response.status,400);assert.equal(sql.prepare('SELECT count(*) n FROM areas').get().n,before);assert.equal((await call('me')).data.user.area_id,'a');
 });
 
 test('OneMap search requires a session and saves only a server-validated building selection',async t=>{
@@ -319,4 +306,44 @@ test('public registration never allows anonymous community reads or writes',asyn
   assert.equal((await call(path,'GET',null,'invalid')).status,401,path);
  }
  assert.equal((await call('presence','PUT',{available:true},'invalid')).status,401);
+});
+
+
+test('game cards track requests, accepted players and full status server-side',async()=>{
+ const {call}=await fixture();const id=(await call('games','POST',{title:'Testing membership',date:singaporeDate(),slot:'evening',venue:'decide',deck_need:'own',extra_decks:false})).data.id;
+ let card=(await call('games','GET',null,'other')).data.games[0];assert.equal(card.participant_count,1);assert.equal(card.request_status,null);
+ await call('games/'+id+'/join','POST',{deck_need:'own',extra_decks:false},'other');
+ card=(await call('games','GET',null,'other')).data.games[0];assert.equal(card.request_status,'pending');assert.equal(card.participant_count,1);
+ assert.equal((await call('notifications')).data.unread,1);
+ await call('games/'+id+'/join','POST',{deck_need:'own',extra_decks:false},'other');assert.equal((await call('notifications')).data.unread,1);
+ const request=(await call('games/'+id+'/requests')).data.requests[0];await call('games/'+id+'/requests','PUT',{id:request.id,status:'accepted'});
+ card=(await call('games','GET',null,'other')).data.games[0];assert.equal(card.request_status,'accepted');assert.equal(card.participant_count,2);
+ assert.equal((await call('notifications','GET',null,'other')).data.notifications[0].kind,'request_update');
+ assert.equal((await call('games/'+id+'/full','PUT',{is_full:true},'other')).status,403);
+ assert.equal((await call('games/'+id+'/full','PUT',{is_full:true})).status,200);
+ assert.equal((await call('games/'+id+'/join','POST',{deck_need:'own',extra_decks:false},'third')).status,409);
+ assert.equal((await call('games')).data.games[0].is_full,1);
+ await call('games/'+id+'/full','PUT',{is_full:false});assert.equal((await call('games/'+id+'/join','POST',{deck_need:'own',extra_decks:false},'third')).status,200);
+});
+
+test('messages and venue notifications reach only other accepted members; crowns use identity not name',async()=>{
+ const {call,sql}=await fixture();const id=(await call('games','POST',{title:'Notify game',date:singaporeDate(),slot:'evening',venue:'decide',deck_need:'own',extra_decks:false})).data.id;
+ for(const member of ['other','third'])await call('games/'+id+'/join','POST',{deck_need:'own',extra_decks:false},member);
+ const request=(await call('games/'+id+'/requests')).data.requests.find(r=>r.username==='other-secret-name');await call('games/'+id+'/requests','PUT',{id:request.id,status:'accepted'});
+ sql.prepare('UPDATE users SET username=?').run('Same name');
+ await call('games/'+id+'/messages','POST',{body:'Host message'});
+ await call('games/'+id+'/messages','POST',{body:'Guest message'},'other');
+ const messages=(await call('games/'+id+'/messages','GET',null,'other')).data.messages;assert.deepEqual(messages.map(m=>Number(m.is_creator)),[1,0]);
+ await call('games/'+id+'/venue','PUT',{details:'Private room number'});
+ const memberNotes=(await call('notifications','GET',null,'other')).data.notifications;assert.equal(memberNotes.filter(n=>n.kind==='message').length,1);assert.equal(memberNotes.filter(n=>n.kind==='venue').length,1);
+ assert.equal((await call('notifications','GET',null,'third')).data.notifications.length,0);
+ assert.ok(!JSON.stringify(memberNotes).includes('Private room number'));assert.ok(!JSON.stringify(memberNotes).includes('Host message'));
+ const hostBefore=(await call('notifications')).data.unread;await call('notifications/read','POST',{},'other');assert.equal((await call('notifications','GET',null,'other')).data.unread,0);assert.equal((await call('notifications')).data.unread,hostBefore);
+ assert.equal((await call('notifications','GET',null,'invalid')).status,401);
+});
+
+test('own saved schedule is exposed as an anonymous self contribution even when ready',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-19T10:30:00Z')});
+ const {call}=await fixture();await call('preferences','PUT',{preferences:[{day:1,slot:'evening'}]});await call('presence','PUT',{available:true});
+ const data=(await call('discovery')).data;assert.equal(data.self_status,'now');assert.equal(data.self_usual,true);
 });

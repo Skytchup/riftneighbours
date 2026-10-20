@@ -4,7 +4,7 @@ const ready=new WeakMap();
 const additions={
  users:{available_until:'INTEGER NOT NULL DEFAULT 0',share_map:'INTEGER NOT NULL DEFAULT 0 CHECK(share_map IN (0,1))'},
  areas:{latitude:'REAL',longitude:'REAL',address:"TEXT NOT NULL DEFAULT ''",postal:"TEXT NOT NULL DEFAULT ''",geo_attempted_at:'INTEGER NOT NULL DEFAULT 0'},
- games:{deck_need:"TEXT NOT NULL DEFAULT 'own' CHECK(deck_need IN ('own','need'))",extra_decks:'INTEGER NOT NULL DEFAULT 0 CHECK(extra_decks IN (0,1))'},
+ games:{is_full:'INTEGER NOT NULL DEFAULT 0 CHECK(is_full IN (0,1))',deck_need:"TEXT NOT NULL DEFAULT 'own' CHECK(deck_need IN ('own','need'))",extra_decks:'INTEGER NOT NULL DEFAULT 0 CHECK(extra_decks IN (0,1))'},
  requests:{deck_need:"TEXT NOT NULL DEFAULT 'own' CHECK(deck_need IN ('own','need'))",extra_decks:'INTEGER NOT NULL DEFAULT 0 CHECK(extra_decks IN (0,1))'},
  decks:{legend_id:'TEXT',custom_name:"TEXT NOT NULL DEFAULT ''"}
 };
@@ -12,6 +12,8 @@ export async function ensureSchema(db){
  if(!ready.has(db)){
   const task=(async()=>{
    await db.prepare('CREATE TABLE IF NOT EXISTS condo_favourites (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,area_id TEXT NOT NULL REFERENCES areas(id) ON DELETE CASCADE,created_at INTEGER NOT NULL,PRIMARY KEY(user_id,area_id))').run();
+   await db.prepare('CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,kind TEXT NOT NULL,body TEXT NOT NULL,created_at INTEGER NOT NULL,read_at INTEGER)').run();
+   await db.prepare('CREATE INDEX IF NOT EXISTS notifications_user ON notifications(user_id,created_at)').run();
    for(const [table,columns] of Object.entries(additions)){
     const existing=new Set((await db.prepare(`PRAGMA table_info(${table})`).all()).results.map(c=>c.name));
     for(const [column,definition] of Object.entries(columns))if(!existing.has(column)){

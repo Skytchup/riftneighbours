@@ -45,5 +45,5 @@ export async function discover(env,user,{scope='area',radius=5}={}){
   if(!groups.has(row.area_id))groups.set(row.area_id,{id:row.area_id,name:row.name,address:row.address,latitude:row.latitude,longitude:row.longitude,distance:distance==null?null:Math.round(distance*10)/10,ready_count:0,usual_count:0,total_count:0});
   const group=groups.get(row.area_id);group.total_count++;if(row.available_until>time)group.ready_count++;if(row.usual)group.usual_count++;
  }
- return {groups:[...groups.values()].sort((a,b)=>(a.distance??0)-(b.distance??0)),home:{name:home.name,latitude:home.latitude,longitude:home.longitude},self_status,slot,date:today,radius,unmapped};
+ return {groups:[...groups.values()].sort((a,b)=>(a.distance??0)-(b.distance??0)),home:{name:home.name,latitude:home.latitude,longitude:home.longitude},self_status,self_usual:Boolean(ownSchedule),slot,date:today,radius,unmapped};
 }

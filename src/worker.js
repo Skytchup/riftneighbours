@@ -18,6 +18,12 @@ const cookie=(name,value,max)=>`${name}=${value}; Path=/; HttpOnly; SameSite=Lax
 const hash=async s=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))).map(x=>x.toString(16).padStart(2,'0')).join('');
 const cookies=req=>Object.fromEntries((req.headers.get('Cookie')||'').split(';').map(v=>v.trim().split('=')));
 export default {async scheduled(event,env){if(env.DB)await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at<=?').bind(now()),env.DB.prepare('DELETE FROM confirmations WHERE date<?').bind(singaporeDate())])},async fetch(req,env){try{return await handle(req,env)}catch(e){console.error(e.message);return json({error:'Something went wrong. Please try again.'},500)}}};
+function notify(db,game,actor,kind,body,ownerOnly=false){
+ return db.prepare(`INSERT INTO notifications(id,user_id,game_id,kind,body,created_at)
+ SELECT lower(hex(randomblob(16))),u.id,g.id,?,?,? FROM users u JOIN games g ON g.id=?
+ WHERE u.id!=? AND (u.id=g.user_id ${ownerOnly?'':"OR EXISTS(SELECT 1 FROM requests r WHERE r.game_id=g.id AND r.user_id=u.id AND r.status='accepted')"})
+ AND NOT EXISTS(SELECT 1 FROM blocks b WHERE (b.user_id=u.id AND b.blocked_id=?) OR (b.user_id=? AND b.blocked_id=u.id))`).bind(kind,body,now(),game,actor,actor,actor);
+}
 async function handle(req,env){
  const url=new URL(req.url),p=url.pathname;
  if(!p.startsWith('/api/')&&!p.startsWith('/auth/'))return env.ASSETS.fetch(req);
@@ -57,6 +63,8 @@ async function handle(req,env){
  const db=env.DB,uid=user.id;
  await ensureSchema(db);
  Object.assign(user,await db.prepare('SELECT available_until,share_map FROM users WHERE id=?').bind(uid).first());
+ if(p==='/api/notifications'&&req.method==='GET')return json({notifications:(await db.prepare('SELECT n.id,n.game_id,n.kind,n.body,n.created_at,n.read_at,g.title FROM notifications n JOIN games g ON g.id=n.game_id WHERE n.user_id=? ORDER BY n.created_at DESC,n.id DESC LIMIT 50').bind(uid).all()).results,unread:(await db.prepare('SELECT count(*) n FROM notifications WHERE user_id=? AND read_at IS NULL').bind(uid).first()).n});
+ if(p==='/api/notifications/read'&&req.method==='POST'){await db.prepare('UPDATE notifications SET read_at=? WHERE user_id=? AND read_at IS NULL').bind(now(),uid).run();return json({ok:true})}
  if(p==='/api/presence'&&req.method==='PUT'){
   const b=await readPresence(req);
   if(!user.area_id)return json({error:'Choose your location in Profile first.'},400);
@@ -120,7 +128,8 @@ async function handle(req,env){
   const planning=planningAreas.find(a=>a.id===b.area_id);
   let selected=planning||await db.prepare('SELECT * FROM areas WHERE id=?').bind(b.area_id).first();
   if(!selected)return json({error:'Choose a location from the list'},400);
-  let condo=(b.condo_name||'').normalize('NFKC').trim().replace(/\s+/g,' '),geometry=null;
+  if(b.condo_name&& !b.onemap_selection)return json({error:'Choose your condo from OneMap search results.'},400);
+  let condo='',geometry=null;
   if(b.onemap_selection!==undefined){
    const choice=b.onemap_selection;
    if(!planning||!choice||!text(choice.query,100)||!text(choice.id,24))return json({error:'Choose a neighbourhood and search result again.'},400);
@@ -172,7 +181,7 @@ async function handle(req,env){
   }return json({counts,date:today,scope});
  }
  if(p==='/api/games'&&req.method==='GET'){
-  const rows=(await db.prepare(`SELECT g.id,g.user_id,g.title,g.date,g.slot,g.venue,g.deck_need,g.extra_decks FROM games g JOIN users u ON u.id=g.user_id JOIN areas a ON a.id=g.area_id WHERE a.neighbourhood=(SELECT neighbourhood FROM areas WHERE id=?) AND g.date>=? AND ${visible} ORDER BY g.date,g.created_at LIMIT 50`).bind(user.area_id,singaporeDate(),uid,uid).all()).results;
+  const rows=(await db.prepare(`SELECT g.id,g.user_id,g.title,g.date,g.slot,g.venue,g.deck_need,g.extra_decks,g.is_full,(SELECT status FROM requests WHERE game_id=g.id AND user_id=?) request_status,1+(SELECT count(*) FROM requests WHERE game_id=g.id AND status='accepted') participant_count FROM games g JOIN users u ON u.id=g.user_id JOIN areas a ON a.id=g.area_id WHERE a.neighbourhood=(SELECT neighbourhood FROM areas WHERE id=?) AND g.date>=? AND ${visible} ORDER BY g.date,g.created_at LIMIT 50`).bind(uid,user.area_id,singaporeDate(),uid,uid).all()).results;
   return json({games:rows});
  }
  if(p==='/api/games'&&req.method==='POST'){
@@ -180,27 +189,35 @@ async function handle(req,env){
   const recent=await db.prepare('SELECT count(*) n FROM games WHERE user_id=? AND created_at>?').bind(uid,now()-86400).first();if(recent.n>=5)return json({error:'Please limit suggestions to five per day'},429);
   const id=crypto.randomUUID();await db.prepare('INSERT INTO games(id,user_id,area_id,title,date,slot,venue,details,created_at,deck_need,extra_decks) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(id,uid,user.area_id,b.title.trim(),b.date,b.slot,b.venue,'',now(),b.deck_need,b.extra_decks?1:0).run();return json({id},201);
  }
- const match=p.match(/^\/api\/games\/([a-zA-Z0-9-]+)(?:\/(join|requests|messages|venue))?$/);
+ const match=p.match(/^\/api\/games\/([a-zA-Z0-9-]+)(?:\/(join|requests|messages|venue|full))?$/);
  if(match){const id=match[1],action=match[2];const game=await db.prepare('SELECT g.*,u.username FROM games g JOIN users u ON u.id=g.user_id WHERE g.id=?').bind(id).first();if(!game)return json({error:'Game not found'},404);
   const blocked=await db.prepare('SELECT 1 FROM blocks WHERE (user_id=? AND blocked_id=?) OR (user_id=? AND blocked_id=?)').bind(uid,game.user_id,game.user_id,uid).first();if(blocked)return json({error:'Game unavailable'},404);
   const owner=game.user_id===uid;const request=await db.prepare('SELECT status FROM requests WHERE game_id=? AND user_id=?').bind(id,uid).first();const participant=owner||request?.status==='accepted';
+  if(action==='full'&&owner&&req.method==='PUT'){const b=await read();if(typeof b.is_full!=='boolean')return json({error:'Choose a valid event status'},400);await db.prepare('UPDATE games SET is_full=? WHERE id=?').bind(b.is_full?1:0,id).run();return json({ok:true,is_full:b.is_full})}
   if(action==='join'&&req.method==='POST'){
    const allowed=await db.prepare('SELECT 1 FROM areas a JOIN areas b ON a.neighbourhood=b.neighbourhood WHERE a.id=? AND b.id=?').bind(user.area_id,game.area_id).first();if(!allowed||owner||game.date<singaporeDate())return json({error:'Cannot join this game'},400);
+   if(game.is_full&&request?.status!=='accepted')return json({error:'This event is full'},409);
    const b=await read();if(!deckPreferencesValid(b))return json({error:'Choose whether you need a deck'},400);
-   await db.prepare('INSERT INTO requests(id,game_id,user_id,status,deck_need,extra_decks) VALUES(?,?,?,?,?,?) ON CONFLICT(game_id,user_id) DO UPDATE SET deck_need=excluded.deck_need,extra_decks=excluded.extra_decks').bind(crypto.randomUUID(),id,uid,'pending',b.deck_need,b.extra_decks?1:0).run();return json({ok:true});
+   const statement=db.prepare(`INSERT INTO requests(id,game_id,user_id,status,deck_need,extra_decks) VALUES(?,?,?,?,?,?) ON CONFLICT(game_id,user_id) DO UPDATE SET status=CASE WHEN requests.status='declined' THEN 'pending' ELSE requests.status END,deck_need=excluded.deck_need,extra_decks=excluded.extra_decks`).bind(crypto.randomUUID(),id,uid,'pending',b.deck_need,b.extra_decks?1:0);
+   await db.batch([statement,...(!request||request.status==='declined'?[notify(db,id,uid,'join_request','Someone asked to join your game.',true)]:[])]);return json({ok:true});
   }
   if(action==='requests'&&owner){
    if(req.method==='GET')return json({requests:(await db.prepare('SELECT r.id,r.status,r.deck_need,r.extra_decks,u.username FROM requests r JOIN users u ON u.id=r.user_id WHERE game_id=?').bind(id).all()).results});
-   if(req.method==='PUT'){const b=await read();if(!['accepted','declined'].includes(b.status))return json({error:'Invalid decision'},400);await db.prepare('UPDATE requests SET status=? WHERE id=? AND game_id=?').bind(b.status,b.id,id).run();return json({ok:true})}
+   if(req.method==='PUT'){
+    const b=await read();if(!['accepted','declined'].includes(b.status))return json({error:'Invalid decision'},400);
+    const target=await db.prepare('SELECT user_id,status FROM requests WHERE id=? AND game_id=?').bind(b.id,id).first();if(!target)return json({error:'Request not found'},404);
+    if(game.is_full&&b.status==='accepted'&&target.status!=='accepted')return json({error:'Reopen the event before accepting more players.'},409);
+    await db.batch([db.prepare('UPDATE requests SET status=? WHERE id=? AND game_id=?').bind(b.status,b.id,id),...(target.status!==b.status?[db.prepare('INSERT INTO notifications(id,user_id,game_id,kind,body,created_at) VALUES(?,?,?,?,?,?)').bind(crypto.randomUUID(),target.user_id,id,'request_update',b.status==='accepted'?'You joined the game.':'Your join request was declined.',now())]:[])]);return json({ok:true});
+   }
   }
-  if(action==='venue'&&owner&&req.method==='PUT'){const b=await read();if(!text(b.details,500))return json({error:'Enter meeting instructions'},400);await db.prepare('UPDATE games SET details=? WHERE id=?').bind(b.details.trim(),id).run();return json({ok:true})}
+  if(action==='venue'&&owner&&req.method==='PUT'){const b=await read();if(!text(b.details,500))return json({error:'Enter meeting instructions'},400);await db.batch([db.prepare('UPDATE games SET details=? WHERE id=?').bind(b.details.trim(),id),notify(db,id,uid,'venue','The organiser updated the meeting location.')]);return json({ok:true})}
   if(action==='messages'&&participant){
-   if(req.method==='GET')return json({messages:(await db.prepare('SELECT m.body,m.created_at,u.username FROM messages m JOIN users u ON u.id=m.user_id WHERE game_id=? ORDER BY m.created_at LIMIT 100').bind(id).all()).results,details:game.details});
-   if(req.method==='POST'){const b=await read();if(!text(b.body,500))return json({error:'Message must be 1–500 characters'},400);const recent=await db.prepare('SELECT count(*) n FROM messages WHERE user_id=? AND created_at>?').bind(uid,now()-60).first();if(recent.n>=10)return json({error:'Please wait before sending more messages'},429);await db.prepare('INSERT INTO messages VALUES(?,?,?,?,?)').bind(crypto.randomUUID(),id,uid,b.body.trim(),now()).run();return json({ok:true})}
+   if(req.method==='GET')return json({messages:(await db.prepare('SELECT m.body,m.created_at,u.username,(m.user_id=?) is_creator FROM messages m JOIN users u ON u.id=m.user_id WHERE game_id=? ORDER BY m.created_at LIMIT 100').bind(game.user_id,id).all()).results,details:game.details});
+   if(req.method==='POST'){const b=await read();if(!text(b.body,500))return json({error:'Message must be 1–500 characters'},400);const recent=await db.prepare('SELECT count(*) n FROM messages WHERE user_id=? AND created_at>?').bind(uid,now()-60).first();if(recent.n>=10)return json({error:'Please wait before sending more messages'},429);await db.batch([db.prepare('INSERT INTO messages VALUES(?,?,?,?,?)').bind(crypto.randomUUID(),id,uid,b.body.trim(),now()),notify(db,id,uid,'message','New message in your game.')]);return json({ok:true})}
   }
   return json({error:'Not allowed'},403);
  }
- if(p==='/api/my-games'&&req.method==='GET')return json({games:(await db.prepare('SELECT g.id,g.title,g.date,g.slot,g.user_id,g.deck_need,g.extra_decks,r.status,r.deck_need AS request_deck_need,r.extra_decks AS request_extra_decks FROM games g LEFT JOIN requests r ON r.game_id=g.id AND r.user_id=? WHERE g.user_id=? OR r.user_id=? ORDER BY g.date DESC LIMIT 50').bind(uid,uid,uid).all()).results});
+ if(p==='/api/my-games'&&req.method==='GET')return json({games:(await db.prepare(`SELECT g.id,g.title,g.date,g.slot,g.user_id,g.deck_need,g.extra_decks,g.is_full,1+(SELECT count(*) FROM requests WHERE game_id=g.id AND status='accepted') participant_count,r.status,r.deck_need AS request_deck_need,r.extra_decks AS request_extra_decks FROM games g LEFT JOIN requests r ON r.game_id=g.id AND r.user_id=? WHERE g.user_id=? OR r.user_id=? ORDER BY g.date DESC LIMIT 50`).bind(uid,uid,uid).all()).results});
  if(p==='/api/blocks'&&req.method==='POST'){const b=await read();if(!text(b.user_id,80)||b.user_id===uid)return json({error:'Invalid member'},400);await db.prepare('INSERT OR IGNORE INTO blocks VALUES(?,?)').bind(uid,b.user_id).run();return json({ok:true})}
  if(p==='/api/report'&&req.method==='POST'){const b=await read();if(!text(b.reason,500)||!text(b.game_id,80))return json({error:'Enter a reason'},400);const recent=await db.prepare('SELECT count(*) n FROM reports WHERE user_id=? AND created_at>?').bind(uid,now()-3600).first();if(recent.n>=5)return json({error:'Report limit reached'},429);await db.prepare('INSERT INTO reports VALUES(?,?,?,?,?)').bind(crypto.randomUUID(),uid,b.game_id,b.reason,now()).run();return json({ok:true})}
  if(p==='/api/account'&&req.method==='DELETE'){await db.batch([db.prepare('DELETE FROM games WHERE user_id=?').bind(uid),db.prepare('DELETE FROM users WHERE id=?').bind(uid)]);return json({ok:true},200,{'set-cookie':cookie('rn_session','',0)})}
