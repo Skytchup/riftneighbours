@@ -1,7 +1,6 @@
 import {showCondos} from './condo-view.js';
 import {mountMap,visibleGroups} from './nearby-map.js';
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const clock=value=>new Intl.DateTimeFormat('en-SG',{timeZone:'Asia/Singapore',hour:'numeric',minute:'2-digit'}).format(new Date(value*1000));
 let activeMap=null,chosenFilter='all';
 export function disposeDiscovery(){activeMap?.destroy();activeMap=null}
 export async function showNearby(o){
@@ -21,7 +20,7 @@ export async function showNearby(o){
  if(!valid())return;
  const nowCount=data.groups.reduce((n,g)=>n+g.ready_count,0)+(available?1:0),usualCount=data.groups.reduce((n,g)=>n+g.usual_count,0)+(data.self_usual?1:0);
  const needsLocation=!data.home?.latitude;
- app.innerHTML=`<section class="discovery-overview"><div class="discovery-title"><h1>Who's nearby?</h1><div class="map-key"><span><i class="status-dot now"></i> ${nowCount} ready to play</span><span><i class="status-dot usual"></i> ${usualCount} usually available</span></div></div><div class="presence-control"><button id="available-now" class="${available?'is-active':'primary'}" aria-pressed="${available}">${available?'✓ Ready to Play':'Ready to Play'}</button><small>${available?'Until '+clock(state.user.available_until)+' SGT · click to stop':'Let neighbours know · lasts 2 hours'}</small></div>
+ app.innerHTML=`<section class="discovery-overview"><div class="discovery-title"><h1>Who's nearby?</h1><div class="map-key"><span><i class="status-dot now"></i> ${nowCount} ready to play</span><span><i class="status-dot usual"></i> ${usualCount} usually available</span></div></div>
  <div class="discovery-controls"><div class="row"><label>Show<select id="map-filter"><option value="all">All players</option><option value="now">Ready to Play</option><option value="usual">Usually available</option></select></label><label>Within<select id="map-radius">${[2,5,10,20].map(r=>`<option value="${r}" ${r===radius?'selected':''}>${r} km</option>`).join('')}</select></label></div></div></section>
  <div class="discovery-layout"><div class="map-panel"><div id="nearby-map" aria-label="Map of nearby players by condo"></div><div class="map-caption"><span><i class="status-dot now"></i> Ready to Play</span><span><i class="status-dot usual"></i> Usually available</span><span>Condo locations · SGT</span></div></div><aside class="player-panel"><div class="row between"><h2>Nearby players</h2><button id="refresh-map" class="quiet">Refresh</button></div><div id="player-list"></div></aside></div>
  ${needsLocation?'<p class="map-note">Choose your condo using OneMap in <a href="#profile">Profile</a> to centre the map and search by distance. Without a condo location, results stay within your neighbourhood.</p>':''}
@@ -44,12 +43,6 @@ export async function showNearby(o){
  app.querySelector('#map-radius').onchange=e=>o.onRadius(Number(e.target.value));
  app.querySelector('#refresh-map').onclick=o.onRefresh;
 
- async function update(body){
-  if(!state.user.area_id){o.onProfile();return}
-  try{const result=demo?{available_until:body.available===undefined?state.user.available_until:body.available?time+7200:0,share_map:body.share_map===undefined?state.user.share_map:body.share_map?1:0}:await api('presence','PUT',body);Object.assign(state.user,result);o.persist();o.onRefresh()}
-  catch(error){o.toast(error.message);if(valid()){app.querySelector('#available-now').disabled=false}}
- }
- app.querySelector('#available-now').onclick=e=>{e.currentTarget.disabled=true;update({available:!available})};
  app.querySelector('#suggest').onclick=o.onSuggest;
  app.querySelectorAll('[data-join]').forEach(button=>button.onclick=()=>o.onJoin(button.dataset.join));
 }

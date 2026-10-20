@@ -176,3 +176,16 @@ header{gap:16px}nav{gap:16px}
 @media(max-width:1100px){header nav{order:initial;width:auto;margin-left:auto}#account-menu{margin-left:0}}
 @media(max-width:560px){header nav{margin-left:auto}.header-menu summary{padding:8px 10px}.header-menu>div{left:0;right:auto}header #auth{padding:8px 10px;font-size:12px}}
 .cancellation-notice{display:flex;width:100%;text-align:left;justify-content:flex-start;gap:12px;margin-top:12px}.cancellation-notice>span:nth-child(2){flex:1}.cancellation-notice small{display:block;font-size:12px;color:var(--soft)}
+
+.site-topbar{position:sticky;top:0;z-index:5;background:#0d2333f7;border-bottom:1px solid #c7a96b45;backdrop-filter:blur(12px)}
+.site-topbar header{border-bottom:0;padding-top:16px;padding-bottom:16px}
+#play-menu summary,#account-menu summary{background:#102c43;color:#eee4cd;border-color:#a98d55;font-weight:500}
+#account-menu .account-signout{display:block;width:100%;text-align:left;justify-content:flex-start;margin-top:5px;padding:8px 10px;border:0;border-top:1px solid var(--line);border-radius:0;color:#eee4cd;background:transparent;font-size:12px}
+#account-menu .account-signout:hover{background:var(--mint)}
+.rift-presence{display:flex;flex-direction:column;gap:4px;flex:1;max-width:360px;min-width:220px;margin:0 auto;padding:10px 17px;text-align:center;border-color:var(--accent);background:linear-gradient(#193d57,#102b43)}
+.rift-presence strong{font-family:Manrope,sans-serif;font-size:15px;line-height:1.3}
+.rift-presence small{font-size:10px;line-height:1.45;font-weight:400;max-width:305px;color:#c8d1d4}
+.rift-presence.is-active{background:linear-gradient(#204d4d,#14363a);border-color:#86baa1;color:#e9f3e5}.rift-presence.is-active small{color:#b8d5c9}
+.discovery-overview{grid-template-columns:minmax(0,1fr) auto}
+@media(max-width:1100px){.rift-presence{order:3;flex-basis:100%;max-width:520px;width:100%;margin:0 auto}.site-topbar header{row-gap:12px}header nav{margin-left:auto}}
+@media(max-width:560px){.rift-presence{min-width:0;max-width:none;padding:9px 14px}.rift-presence small{max-width:320px}.site-topbar header{padding:12px 16px}.site-topbar .brand{font-size:16px}.discovery-overview{grid-template-columns:minmax(0,1fr);gap:12px}}

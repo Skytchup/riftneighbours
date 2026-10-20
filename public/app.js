@@ -17,11 +17,24 @@ async function api(path,method='GET',body){
 function area(){return state.areas.find(a=>a.id===state.user.area_id)}
 function showModal(html){content.innerHTML=html;modal.showModal()}
 function needProfile(){if(!state.user.area_id){location.hash='profile';toast('Choose your neighbourhood first');return true}return false}
-async function start(){try{state=await api('me');document.querySelector('#auth').textContent='Sign out';if(!state.user.area_id)location.hash='profile';render()}catch{landing()}const params=new URLSearchParams(location.search);const errors={setup:'Google sign-in is not connected yet. Please try again later.',expired:'Sign-in expired. Please try again.',cancelled:'Google sign-in was cancelled. You can try again.',failed:'Google sign-in failed. Please try again.',invite:'This pilot is invite-only. Ask the organiser for access.'};if(errors[params.get('signin')])toast(errors[params.get('signin')]);if(params.has('signin')||params.has('welcome'))history.replaceState(null,'',location.pathname+location.hash)}
+async function start(){try{state=await api('me');document.querySelector('#auth').textContent='Sign Out';if(!state.user.area_id)location.hash='profile';render()}catch{landing()}const params=new URLSearchParams(location.search);const errors={setup:'Google sign-in is not connected yet. Please try again later.',expired:'Sign-in expired. Please try again.',cancelled:'Google sign-in was cancelled. You can try again.',failed:'Google sign-in failed. Please try again.',invite:'This pilot is invite-only. Ask the organiser for access.'};if(errors[params.get('signin')])toast(errors[params.get('signin')]);if(params.has('signin')||params.has('welcome'))history.replaceState(null,'',location.pathname+location.hash)}
 function avatarMarkup(id){const legend=legends.find(l=>l.id===id);return legend?'<img src="'+esc(legend.image)+'" alt="" width="36" height="36">':'<svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="14" r="7" fill="currentColor"/><path d="M7 36v-4a13 13 0 0 1 26 0v4" fill="currentColor"/></svg>'}
 function updateAccount(){document.querySelector('#account-username').textContent=state?.user.username||'My account';document.querySelector('#account-avatar').innerHTML=avatarMarkup(state?.user.avatar_legend_id);}
 function loading(title='Loading…'){app.setAttribute('aria-busy','true');app.innerHTML='<div class="page-loading" role="status"><span class="loading-dot" aria-hidden="true"></span><span>'+esc(title)+'</span></div>';}
-function memberNavigation(visible){if(visible)updateAccount();document.querySelector('nav').hidden=!visible;document.querySelector('#auth').hidden=!visible;document.querySelector('#account-menu').hidden=!visible;if(!visible){document.querySelector('#account-menu').open=false;document.querySelector('#play-menu').open=false;}}
+let presenceUpdating=false;
+function renderPresence(){
+ const button=document.querySelector('#available-now'),ready=Boolean(state?.user.available_until>Date.now()/1000);
+ button.setAttribute('aria-pressed',String(ready));button.classList.toggle('is-active',ready);button.disabled=presenceUpdating;
+ button.innerHTML='<strong>'+(ready?"I’m Ready to Play":'Enter the Rift')+'</strong><small>'+(ready?'No longer available? Click to leave the list. Availability expires after 2 hours.':'Click to appear as Ready to Play. Your username and contact details stay private.')+'</small>';
+}
+async function togglePresence(){
+ if(!state||presenceUpdating)return;
+ if(needProfile())return;
+ const uid=state.user.id,available=!(state.user.available_until>Date.now()/1000);presenceUpdating=true;renderPresence();
+ try{const result=demo?{available_until:available?Date.now()/1000+7200:0}:await api('presence','PUT',{available});if(state?.user.id!==uid)return;Object.assign(state.user,result);persist();renderPresence();if(location.hash==='#nearby')await render();}
+ catch(error){toast(error.message)}finally{presenceUpdating=false;renderPresence()}
+}
+function memberNavigation(visible){document.querySelector('#available-now').hidden=!visible;if(visible){updateAccount();renderPresence();}document.querySelector('nav').hidden=!visible;document.querySelector('#auth').hidden=!visible;document.querySelector('#account-menu').hidden=!visible;if(!visible){document.querySelector('#account-menu').open=false;document.querySelector('#play-menu').open=false;}}
 function landing(){notificationData=[];notificationUnread=null;++view;disposeDiscovery();memberNavigation(false);app.innerHTML=`<section class="welcome"><img class="welcome-art" src="https://cmsassets.rgpub.io/sanity/images/dsfx7636/news_live/9e26afe304d2c40664b119a9da0ef82cff692f54-3840x2160.png?w=1100&fm=webp" alt="Riftbound artwork" width="1100" height="619"><div class="welcome-copy"><h1>Riftbound. Nearby.</h1><p>Casual Riftbound games with neighbours in Singapore.</p><p class="compact">Share your schedule, find players nearby and arrange a game together. No hosting required.</p><div class="row"><a class="button primary" href="/auth/google">Create account / sign in with Google</a></div></div></section>`;document.querySelector('#auth').onclick=()=>location.href='/auth/google'}
 function enterDemo(){demo=true;state=initial();gameList=[{id:'sample-game',user_id:'demo-jamie',title:'Two relaxed games after dinner?',date:today(),slot:'evening',venue:'decide'}];try{const saved=JSON.parse(localStorage.getItem('rn-demo'));if(saved?.state){state=saved.state;gameList=saved.gameList||[];myGames=saved.myGames||[]}}catch{}document.querySelector('#mode').hidden=false;document.querySelector('#mode').innerHTML='Demo mode · Fictional counts, browser-only changes, no real invitations. <button id="reset">Reset demo</button>';document.querySelector('#reset').onclick=()=>{localStorage.removeItem('rn-demo');state=initial();gameList=[];myGames=[];render()};document.querySelector('#auth').textContent='Exit demo';render()}
 function heading(eye,title,subtitle){return `<h1>${title}</h1>`}
@@ -90,6 +103,8 @@ for(const id of ['play-menu','account-menu'])document.querySelector('#'+id).addE
 document.querySelectorAll('nav a,#account-menu a').forEach(a=>a.addEventListener('click',event=>{if(a.hash===location.hash){event.preventDefault();render()}}));
 setInterval(refreshNotifications,30000);
 window.addEventListener('focus',refreshNotifications);
+document.querySelector('#available-now').onclick=togglePresence;
+setInterval(()=>{if(state&&!document.hidden)renderPresence()},30000);
 document.querySelector('#close-modal').onclick=()=>modal.close();window.addEventListener('hashchange',render);start();
 
 function areaLabel(a){return a.kind==='neighbourhood'?a.name:`${a.name} · ${a.neighbourhood}`}
