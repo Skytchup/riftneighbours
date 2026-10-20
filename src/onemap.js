@@ -9,10 +9,10 @@ export function oneMap(env) {
  let token=null,pending=null;
  const queries=new Map();
  async function authenticate(){
-  if(!env.ONEMAP_EMAIL||!env.ONEMAP_PASSWORD)throw new LocationError('Location search is not connected yet. You can still enter your condo name.');
+  if(!env.ONEMAP_EMAIL||!env.ONEMAP_PASSWORD)throw new LocationError('Location search is not connected yet. Please try again later.');
   if(token&&token.expires>Date.now()+60000)return token.value;
   if(!pending)pending=(async()=>{
-   const response=await fetch('https://www.onemap.gov.sg/api/auth/post/getToken',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:env.ONEMAP_EMAIL,password:env.ONEMAP_PASSWORD}),signal:AbortSignal.timeout(8000)});
+   const response=await fetch('https://www.onemap.gov.sg/api/auth/post/getToken',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:env.ONEMAP_EMAIL,password:env.ONEMAP_PASSWORD}),signal:AbortSignal.timeout(4000)});
    if(!response.ok)throw new LocationError('Location search could not connect to OneMap. Please try again later.');
    const data=await response.json(),expires=Number(data.expiry_timestamp)*1000;
    if(typeof data.access_token!=='string'||!data.access_token||!Number.isFinite(expires)||expires<=Date.now()+60000)throw new LocationError('Location search is temporarily unavailable.');
@@ -31,7 +31,7 @@ export function oneMap(env) {
    let response;
    for(let attempt=0;attempt<2;attempt++){
     const value=await authenticate();
-    response=await fetch(url,{headers:{Authorization:value},signal:AbortSignal.timeout(8000)});
+    response=await fetch(url,{headers:{Authorization:value},signal:AbortSignal.timeout(4000)});
     if(![401,403].includes(response.status))break;
     if(token?.value===value)token=null;
    }
@@ -63,7 +63,7 @@ export function oneMap(env) {
  async function authorized(url){
   let response;
   for(let attempt=0;attempt<2;attempt++){
-   const value=await authenticate();response=await fetch(url,{headers:{Authorization:value},signal:AbortSignal.timeout(8000)});
+   const value=await authenticate();response=await fetch(url,{headers:{Authorization:value},signal:AbortSignal.timeout(4000)});
    if(![401,403].includes(response.status))break;if(token?.value===value)token=null;
   }
   if(!response.ok)throw new LocationError('OneMap lookup is temporarily unavailable.');

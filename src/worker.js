@@ -1,3 +1,4 @@
+import {legends} from '../public/legends.js';
 import { SLOTS, singaporeDate, singaporeDay, validDate, preferencesValid, text, deckPreferencesValid } from './domain.js';
 import { planningAreas, locationChoices } from './areas.js';
 import { oneMap, LocationError } from './onemap.js';
@@ -17,7 +18,7 @@ const now=()=>Math.floor(Date.now()/1000);
 const cookie=(name,value,max)=>`${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${max}; Secure`;
 const hash=async s=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))).map(x=>x.toString(16).padStart(2,'0')).join('');
 const cookies=req=>Object.fromEntries((req.headers.get('Cookie')||'').split(';').map(v=>v.trim().split('=')));
-export default {async scheduled(event,env){if(env.DB)await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at<=?').bind(now()),env.DB.prepare('DELETE FROM confirmations WHERE date<?').bind(singaporeDate())])},async fetch(req,env){try{return await handle(req,env)}catch(e){console.error(e.message);return json({error:'Something went wrong. Please try again.'},500)}}};
+export default {async scheduled(event,env){if(env.DB)await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at<=?').bind(now()),env.DB.prepare('DELETE FROM confirmations WHERE date<?').bind(singaporeDate())])},async fetch(req,env){const started=performance.now();let response;try{response=await handle(req,env)}catch(e){console.error(e.message);response=json({error:'Something went wrong. Please try again.'},500)}if(new URL(req.url).pathname.startsWith('/api/')){response=new Response(response.body,response);response.headers.set('Server-Timing','app;dur='+(performance.now()-started).toFixed(1));}return response}};
 function notify(db,game,actor,kind,body,ownerOnly=false){
  return db.prepare(`INSERT INTO notifications(id,user_id,game_id,kind,body,created_at)
  SELECT lower(hex(randomblob(16))),u.id,g.id,?,?,? FROM users u JOIN games g ON g.id=?
@@ -62,7 +63,7 @@ async function handle(req,env){
  if(!user)return json({error:'Please sign in'},401);
  const db=env.DB,uid=user.id;
  await ensureSchema(db);
- Object.assign(user,await db.prepare('SELECT available_until,share_map FROM users WHERE id=?').bind(uid).first());
+ Object.assign(user,await db.prepare('SELECT available_until,share_map,avatar_legend_id FROM users WHERE id=?').bind(uid).first());
  if(p==='/api/notifications'&&req.method==='GET')return json({notifications:(await db.prepare('SELECT n.id,n.game_id,n.kind,n.body,n.created_at,n.read_at,g.title FROM notifications n JOIN games g ON g.id=n.game_id WHERE n.user_id=? ORDER BY n.created_at DESC,n.id DESC LIMIT 50').bind(uid).all()).results,unread:(await db.prepare('SELECT count(*) n FROM notifications WHERE user_id=? AND read_at IS NULL').bind(uid).first()).n});
  if(p==='/api/notifications/read'&&req.method==='POST'){await db.prepare('UPDATE notifications SET read_at=? WHERE user_id=? AND read_at IS NULL').bind(now(),uid).run();return json({ok:true})}
  if(p==='/api/presence'&&req.method==='PUT'){
@@ -119,9 +120,18 @@ async function handle(req,env){
   try{return json({results:await oneMap(env).search(query),source:'OneMap / Singapore Land Authority'})}
   catch(error){if(error instanceof LocationError)return json({error:error.message},503);throw error}
  }
- if(p==='/api/me'&&req.method==='GET')return json({user,preferences:(await db.prepare('SELECT day,slot FROM preferences WHERE user_id=?').bind(uid).all()).results,decks:(await db.prepare('SELECT id,name,legend_id,custom_name FROM decks WHERE user_id=?').bind(uid).all()).results,confirmations:(await db.prepare('SELECT date,slot FROM confirmations WHERE user_id=? AND date>=?').bind(uid,singaporeDate()).all()).results,areas:locationChoices((await db.prepare('SELECT * FROM areas ORDER BY neighbourhood,name').all()).results)});
+ if(p==='/api/me'&&req.method==='GET'){
+  const [preferences,decks,confirmations,areas]=await Promise.all([
+   db.prepare('SELECT day,slot FROM preferences WHERE user_id=?').bind(uid).all(),
+   db.prepare('SELECT id,name,legend_id,custom_name FROM decks WHERE user_id=?').bind(uid).all(),
+   db.prepare('SELECT date,slot FROM confirmations WHERE user_id=? AND date>=?').bind(uid,singaporeDate()).all(),
+   db.prepare('SELECT * FROM areas ORDER BY neighbourhood,name').all()
+  ]);return json({user,preferences:preferences.results,decks:decks.results,confirmations:confirmations.results,areas:locationChoices(areas.results)});
+ }
  if(p==='/api/profile'&&req.method==='PUT'){
   const b=await read();
+  const avatar=b.avatar_legend_id===undefined?user.avatar_legend_id:b.avatar_legend_id;
+  if(avatar!==null&&avatar!==undefined&&!legends.some(l=>l.id===avatar))return json({error:'Choose a valid Legend avatar.'},400);
   const decks=b.decks===undefined?undefined:prepareDecks(b.decks);
   if(decks===null)return json({error:'Choose a valid Legend for each deck; deck names are optional (60 characters maximum).'},400);
   if(!text(b.username,30)||!['casual','learning','teaching'].includes(b.style)||!text(b.area_id,100)||(b.condo_name!==undefined&&(typeof b.condo_name!=='string'||b.condo_name.length>100)))return json({error:'Choose a username, area and play style'},400);
@@ -147,7 +157,7 @@ async function handle(req,env){
   await db.batch([
    db.prepare('INSERT OR IGNORE INTO areas(id,name,neighbourhood) VALUES(?,?,?)').bind(selected.id,selected.name,selected.neighbourhood),
    ...(geometry?[db.prepare('UPDATE areas SET latitude=COALESCE(latitude,?),longitude=COALESCE(longitude,?),address=CASE WHEN address=\'\' THEN ? ELSE address END,postal=CASE WHEN postal=\'\' THEN ? ELSE postal END WHERE id=?').bind(geometry.latitude,geometry.longitude,geometry.address,geometry.postal,selected.id)]:[]),
-   db.prepare('UPDATE users SET username=?,area_id=?,style=?,share_condo=?,share_map=? WHERE id=?').bind(b.username.trim(),selected.id,b.style,share,selected.id.startsWith('sg-pa-')?0:(b.share_map===undefined?user.share_map:b.share_map===true?1:0),uid),
+   db.prepare('UPDATE users SET username=?,area_id=?,style=?,share_condo=?,share_map=?,avatar_legend_id=? WHERE id=?').bind(b.username.trim(),selected.id,b.style,share,selected.id.startsWith('sg-pa-')?0:(b.share_map===undefined?user.share_map:b.share_map===true?1:0),avatar??null,uid),
    ...(decks===undefined?[]:deckStatements(db,uid,decks))
   ]);
   return json({ok:true,area:{...selected,kind:selected.id.startsWith('sg-pa-')?'neighbourhood':'condo'}});

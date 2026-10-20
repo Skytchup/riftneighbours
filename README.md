@@ -170,7 +170,7 @@ The condo tab is separate from the neighbourhood map. Search combines registered
 
 Selecting a condo returns an anonymous 7-day × 3-slot timetable of exact aggregate counts. Only members who opted into condo aggregate counts contribute to this full weekly grid; map-only consent does not disclose weekly patterns. Counts include the viewer when opted in, exclude mutually blocked accounts, and ignore schedules older than 60 days. No usernames, user IDs or individual timetable rows are returned by the condo endpoints.
 
-Nearby recommendations consider registered condos with shared availability and known coordinates, prefilter within 1.5 km, route up to 12 candidates using OneMap walking routes, and show up to six within 15 minutes. Available Now counts rank first; the fallback order is the number of distinct neighbours with any fresh usual availability, then walk duration. Active counts use map or condo aggregate consent. Failed routing uses a labelled approximation (straight-line distance × 1.3 detour at 80 m/min), still applying the 15-minute threshold. Routing results cache for one hour; failures cache for five minutes. No nearby recommendation is invented for unknown coordinates. Migration 0005 and the runtime schema bridge initialize favourites.
+Nearby recommendations use saved condo coordinates and anonymous availability counts. They prefilter within 1.5 km and show up to six within an estimated 15-minute walk. Ready to Play counts rank first, then fresh usual availability and estimated distance. Walking time is clearly labelled as a distance estimate (straight-line distance × 1.3 detour at 80 m/min), not validated route guidance. Ordinary discovery and condo browsing never wait for OneMap geocoding or routing. Unknown coordinates require choosing a OneMap result in Profile. Migration 0005 and the runtime schema bridge initialize favourites.
 
 
 ## Registration: invite-only or public
@@ -208,3 +208,18 @@ Current location-search throttling is in-memory and is not a global anti-scrapin
 - New condo names must come from a server-validated OneMap result. Existing profiles remain usable;
   this change does not merge duplicate condo records that already exist.
 - Main navigation is Play Nearby, Search Postal Code and My availability. My account contains My games and Profile & decks.
+
+
+## Profile avatars and loading performance
+
+The account menu shows the chosen username and an optional official Legend avatar. A new account uses an inline
+silhouette. `avatar_legend_id` is validated against the gallery and saved atomically with the profile; arbitrary
+image URLs are not accepted. My availability is in this account menu.
+
+Navigation clears the old view immediately and shows an accessible loading indicator. Map discovery and game
+cards load independently, so slow game queries cannot delay the map. Initial profile reads run concurrently;
+indexes support area membership and schedule freshness. Client API calls have a 20-second timeout and retry
+messages. Individual OneMap network steps use 4-second timeouts; provider calls remain confined to explicit
+location workflows rather than ordinary browsing. API responses include an `app` duration in `Server-Timing`,
+which can be inspected in browser Network tools. These changes remove known blocking paths; local tests do
+not establish actual signed-in production response times or identify every possible network failure.

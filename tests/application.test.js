@@ -65,7 +65,7 @@ test('OneMap condo search can open a new condo and favourite it without changing
  assert.equal((await call('condos/select','POST',{query:'new',id:'fake'})).status,503);
 });
 
-test('nearby condos use walking routes, rank available players first, then fall back to weekly popularity',async t=>{
+test('nearby condos load from saved data, rank ready players first and label walking estimates',async t=>{
  t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-19T10:30:00Z')});
  const {env,call,sql}=await fixture();await call('me');env.ONEMAP_EMAIL='operator@example.test';env.ONEMAP_PASSWORD='private';
  for(const [id,lat] of [['a',1.35],['b',1.351],['c',1.352]])sql.prepare('UPDATE areas SET latitude=?,longitude=? WHERE id=?').run(lat,103.87,id);
@@ -79,22 +79,22 @@ test('nearby condos use walking routes, rank available players first, then fall 
   const u=new URL(url);assert.equal(u.searchParams.get('routeType'),'walk');
   return Response.json({status:0,route_summary:{total_time:u.searchParams.get('end').startsWith('1.351,')?840:600}});
  });
- let response=await call('condos');assert.equal(response.status,200);assert.deepEqual(response.data.nearby.map(a=>a.id),['b','c']);assert.equal(response.data.nearby[0].walk.minutes,14);assert.equal(response.data.nearby[0].walk.estimated,false);
+ let response=await call('condos');assert.equal(response.status,200);assert.deepEqual(response.data.nearby.map(a=>a.id),['b','c']);assert.ok(response.data.nearby[0].walk.minutes<=15);assert.equal(response.data.nearby[0].walk.estimated,true);
  sql.prepare('UPDATE users SET available_until=0').run();response=await call('condos');assert.deepEqual(response.data.nearby.map(a=>a.id),['c','b']);
  assert.ok(!JSON.stringify(response.data).includes('secret-name'));
 });
 
-test('walking suggestions exclude long routes and clearly label distance fallback when routing fails',async t=>{
- const {env,call,sql}=await fixture();await call('me');env.ONEMAP_EMAIL='operator@example.test';env.ONEMAP_PASSWORD='private';
+test('browsing discovery and condos does not depend on OneMap or external network availability',async t=>{
+ const {call,sql}=await fixture();await call('me');
  sql.prepare('UPDATE areas SET latitude=1.35,longitude=103.87 WHERE id=?').run('a');
  sql.prepare('UPDATE areas SET latitude=1.351,longitude=103.87 WHERE id=?').run('b');
  sql.prepare('INSERT INTO preferences VALUES(?,?,?,?)').run('third',1,'evening',Math.floor(Date.now()/1000));
- const mock=t.mock.method(globalThis,'fetch',async url=>Response.json(String(url).includes('/getToken')?{access_token:'token',expiry_timestamp:Math.floor(Date.now()/1000)+3600}:{status:0,route_summary:{total_time:901}}));
- assert.equal((await call('condos')).data.nearby.length,0);
- // A fresh service simulates a provider outage after a cold start.
- const second=await fixture();await second.call('me');second.sql.prepare('UPDATE areas SET latitude=1.35,longitude=103.87 WHERE id=?').run('a');second.sql.prepare('UPDATE areas SET latitude=1.351,longitude=103.87 WHERE id=?').run('b');second.sql.prepare('INSERT INTO preferences VALUES(?,?,?,?)').run('third',1,'evening',Math.floor(Date.now()/1000));
- mock.mock.mockImplementation(async()=>{throw Error('upstream unavailable')});
- const result=await second.call('condos');assert.equal(result.status,200);assert.equal(result.data.nearby[0].walk.estimated,true);assert.ok(result.data.nearby[0].walk.minutes<=15);
+ const mocked=t.mock.method(globalThis,'fetch',async()=>{throw Error('Provider should not be called by browsing')});
+ const result=await call('condos');assert.equal(result.status,200);assert.equal(result.data.nearby[0].walk.estimated,true);
+ assert.equal((await call('discovery')).status,200);
+ sql.prepare('UPDATE areas SET latitude=NULL,longitude=NULL WHERE id=?').run('a');
+ assert.equal((await call('discovery')).status,200);assert.equal((await call('condos')).status,200);
+ assert.equal(mocked.mock.callCount(),0);
 });
 
 test('Available Now expires after two hours, can be stopped, and does not implicitly share map identity',async t=>{
@@ -346,4 +346,18 @@ test('own saved schedule is exposed as an anonymous self contribution even when 
  t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-19T10:30:00Z')});
  const {call}=await fixture();await call('preferences','PUT',{preferences:[{day:1,slot:'evening'}]});await call('presence','PUT',{available:true});
  const data=(await call('discovery')).data;assert.equal(data.self_status,'now');assert.equal(data.self_usual,true);
+});
+
+
+test('Legend avatars default to silhouette, persist with profile, and reject forged IDs',async()=>{
+ const {call}=await fixture();assert.equal((await call('me')).data.user.avatar_legend_id,null);
+ const profile={username:'Avatar user',area_id:'a',style:'casual',share_condo:true,avatar_legend_id:legends[0].id};
+ assert.equal((await call('profile','PUT',profile)).status,200);assert.equal((await call('me')).data.user.avatar_legend_id,legends[0].id);
+ assert.equal((await call('profile','PUT',{...profile,avatar_legend_id:'untrusted-url'})).status,400);assert.equal((await call('me')).data.user.avatar_legend_id,legends[0].id);
+ await call('profile','PUT',{...profile,avatar_legend_id:null});assert.equal((await call('me')).data.user.avatar_legend_id,null);
+});
+
+test('API responses expose server duration without including request secrets',async()=>{
+ const {env}=await fixture();const response=await worker.fetch(new Request('https://example.test/api/me',{headers:{Cookie:'rn_session=me'}}),env);
+ assert.match(response.headers.get('Server-Timing'),/^app;dur=[0-9.]+$/);
 });

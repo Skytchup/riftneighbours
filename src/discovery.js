@@ -24,7 +24,7 @@ export async function locateArea(env,id){
 }
 export async function discover(env,user,{scope='area',radius=5}={}){
  const time=Math.floor(Date.now()/1000),slot=singaporeSlot(),today=singaporeDate();
- const home=await locateArea(env,user.area_id);
+ const home=await env.DB.prepare('SELECT * FROM areas WHERE id=?').bind(user.area_id).first();
  if(!home)return {groups:[],home:null,slot,date:today,radius};
  const ownSchedule=slot&&await env.DB.prepare('SELECT 1 FROM preferences WHERE user_id=? AND day=? AND slot=? AND updated_at>?').bind(user.id,singaporeDay(today),slot,time-86400*60).first();
  const self_status=user.available_until>time?'now':ownSchedule?'usual':null;

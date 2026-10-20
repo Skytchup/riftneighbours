@@ -8,18 +8,17 @@ export async function showNearby(o){
  if(o.scope==='condo')return showCondos(o);
  const {app,state,demo,scope,radius,api,valid}=o;
  const time=Math.floor(Date.now()/1000),available=state.user.available_until>time;
- let data,games=[],gamesError='';
+ let data;
+ const gamesPromise=demo?Promise.resolve({games:o.demoGames}):state.user.area_id?api('games').catch(()=>({games:[],error:'Games could not load. Please refresh to retry.'})):Promise.resolve({games:[]});
  if(demo){
   data={self_status:available?'now':null,home:{name:'Your demo condo',latitude:1.3508,longitude:103.8723},slot:'evening',unmapped:0,groups:[
    {id:'demo-a',name:'Demo Gardens (fictional)',address:'Sample location · demo only',latitude:1.353,longitude:103.876,distance:0.5,ready_count:1,usual_count:2,total_count:2},
    {id:'demo-b',name:'Demo Residences (fictional)',address:'Sample location · demo only',latitude:1.343,longitude:103.868,distance:1,ready_count:0,usual_count:1,total_count:1}
-  ]};games=o.demoGames;
+  ]};
  }else if(state.user.area_id){
   data=await api('discovery?scope='+scope+'&radius='+radius);
-  try{games=(await api('games')).games}catch{gamesError='Games could not load. The player map is still available.'}
  }else data={home:null,slot:null,groups:[],unmapped:0};
  if(!valid())return;
- o.onGames(games);
  const nowCount=data.groups.reduce((n,g)=>n+g.ready_count,0)+(available?1:0),usualCount=data.groups.reduce((n,g)=>n+g.usual_count,0)+(data.self_usual?1:0);
  const needsLocation=!data.home?.latitude;
  app.innerHTML=`<section class="discovery-overview"><div class="discovery-title"><h1>Who's nearby?</h1><div class="map-key"><span><i class="status-dot now"></i> ${nowCount} ready to play</span><span><i class="status-dot usual"></i> ${usualCount} usually available</span></div></div><div class="presence-control"><button id="available-now" class="${available?'is-active':'primary'}" aria-pressed="${available}">${available?'✓ Ready to Play':'Ready to Play'}</button><small>${available?'Until '+clock(state.user.available_until)+' SGT · click to stop':'Let neighbours know · lasts 2 hours'}</small></div>
@@ -28,7 +27,12 @@ export async function showNearby(o){
  ${needsLocation?'<p class="map-note">Choose your condo using OneMap in <a href="#profile">Profile</a> to centre the map and search by distance. Without a condo location, results stay within your neighbourhood.</p>':''}
  ${data.unmapped?'<p class="map-note">Some players do not yet have a map location.</p>':''}
  <p class="compact muted">${data.slot?'Amber matches the current '+esc(data.slot)+' slot in saved schedules.':'There is no scheduled slot before 2 pm; only Ready to Play appears.'} Scheduled availability is a preference, not a confirmation. Counts include you.</p>
- <div class="row between section games-heading"><h2>Nearby games</h2><button class="primary" id="suggest">Suggest a game +</button></div>${gamesError?`<p class="notice">${esc(gamesError)}</p>`:games.length?`<div class="grid">${games.map(g=>`<article class="card"><span class="tag">${g.venue==='decide'?'Venue to decide':g.venue==='shared'?'Shared space offered':'Café suggested'}</span><h3>${esc(g.title)}</h3><p>${esc(g.date)} · ${esc(g.slot)}</p>${o.deckTags(g)}<p class="compact">${g.participant_count??1} player${(g.participant_count??1)===1?'':'s'}${g.is_full?' · Event full':''}</p><button class="full" data-join="${esc(g.id)}" ${g.user_id!==state.user.id&&(g.request_status==='pending'||(g.is_full&&g.request_status!=='accepted'))?'disabled':''}>${g.user_id===state.user.id?'Manage game':g.request_status==='accepted'?'Joined':g.request_status==='pending'?'Pending request':g.is_full?'Event full':'Ask to join'}</button></article>`).join('')}</div>`:'<div class="empty"><p>No games yet. Suggest a time and find a table together.</p></div>'}`;
+ <div class="row between section games-heading"><h2>Nearby games</h2><button class="primary" id="suggest">Suggest a game +</button></div><div id="nearby-games-list"><p class="map-note" role="status">Loading games…</p></div>`;
+ function gamesMarkup(games,gamesError){return `${gamesError?`<p class="notice">${esc(gamesError)}</p>`:games.length?`<div class="grid">${games.map(g=>`<article class="card"><span class="tag">${g.venue==='decide'?'Venue to decide':g.venue==='shared'?'Shared space offered':'Café suggested'}</span><h3>${esc(g.title)}</h3><p>${esc(g.date)} · ${esc(g.slot)}</p>${o.deckTags(g)}<p class="compact">${g.participant_count??1} player${(g.participant_count??1)===1?'':'s'}${g.is_full?' · Event full':''}</p><button class="full" data-join="${esc(g.id)}" ${g.user_id!==state.user.id&&(g.request_status==='pending'||(g.is_full&&g.request_status!=='accepted'))?'disabled':''}>${g.user_id===state.user.id?'Manage game':g.request_status==='accepted'?'Joined':g.request_status==='pending'?'Pending request':g.is_full?'Event full':'Ask to join'}</button></article>`).join('')}</div>`:'<div class="empty"><p>No games yet. Suggest a time and find a table together.</p></div>'}`}
+ gamesPromise.then(result=>{
+  if(!valid())return;const games=result.games||[];o.onGames(games);const list=app.querySelector('#nearby-games-list');if(!list)return;
+  list.innerHTML=gamesMarkup(games,result.error);list.querySelectorAll('[data-join]').forEach(button=>button.onclick=()=>o.onJoin(button.dataset.join));
+ });
  function draw(){
   const groups=visibleGroups(data,app.querySelector('#map-filter').value),list=app.querySelector('#player-list');
   list.innerHTML=groups.length?groups.map(g=>`<button type="button" class="player-location" data-map-location="${esc(g.id)}"><span class="row between"><strong>${esc(g.name)}</strong><small>${g.distance==null?'':g.distance+' km'}</small></span><span class="player-address">${esc(g.address)}</span><span class="player-line"><i class="status-dot now"></i>${g.ready_count} Ready to Play</span><span class="player-line"><i class="status-dot usual"></i>${g.usual_count} usually available</span></button>`).join(''):'<div class="empty player-empty"><h3>No players here yet.</h3><p>Try a wider radius, or mark yourself Ready to Play.</p><a href="#schedule">Edit my schedule →</a></div>';

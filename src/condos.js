@@ -15,7 +15,7 @@ export async function condoStats(db,uid){
  WHERE a.id NOT LIKE 'sg-pa-%' GROUP BY a.id`).bind(time,time-86400*60,day,slot,time-86400*60,uid,uid).all()).results;
 }
 export async function condoOverview(env,user){
- const home=user.area_id&&!user.area_id.startsWith('sg-pa-')?await locateArea(env,user.area_id):null;
+ const home=user.area_id&&!user.area_id.startsWith('sg-pa-')?await env.DB.prepare('SELECT * FROM areas WHERE id=?').bind(user.area_id).first():null;
  const rows=await condoStats(env.DB,user.id);
  const favourites=(await env.DB.prepare('SELECT area_id FROM condo_favourites WHERE user_id=? ORDER BY created_at,area_id').bind(user.id).all()).results.map(r=>r.area_id);
  if(home&&!favourites.includes(home.id))favourites.unshift(home.id);
@@ -24,11 +24,10 @@ export async function condoOverview(env,user){
  if(home?.latitude!=null&&home?.longitude!=null){
   const candidates=rows.filter(a=>a.id!==home.id&&a.latitude!=null&&a.longitude!=null&&(a.available_now>0||a.usual_people>0)).map(a=>({...a,distance:distanceKm(home,a)})).filter(a=>a.distance<=1.5)
    .sort((a,b)=>b.available_now-a.available_now||b.usual_people-a.usual_people||a.distance-b.distance).slice(0,12);
-  nearby=(await Promise.all(candidates.map(async area=>{
-   let walk;
-   try{walk=await oneMap(env).walk(home,area)}catch{walk={minutes:Math.max(1,Math.ceil(area.distance*1000*1.3/80)),estimated:true}}
+  nearby=candidates.map(area=>{
+   const walk={minutes:Math.max(1,Math.ceil(area.distance*1000*1.3/80)),estimated:true};
    return {...summary(area),walk};
-  }))).filter(a=>a.walk.minutes<=15)
+  }).filter(a=>a.walk.minutes<=15)
    .sort((a,b)=>b.available_now-a.available_now||b.usual_people-a.usual_people||a.walk.minutes-b.walk.minutes).slice(0,6);
  }
  return {home:home?publicArea(home):null,favourites:favourites.map(id=>rows.find(a=>a.id===id)).filter(Boolean).map(summary),nearby,can_walk:Boolean(home?.latitude!=null&&home?.longitude!=null)};
