@@ -75,7 +75,7 @@ async function handle(req,env){
   if(b.id){await db.batch([db.prepare('UPDATE notifications SET read_at=? WHERE user_id=? AND id=?').bind(now(),uid,b.id),db.prepare('UPDATE cancellation_notices SET read_at=? WHERE user_id=? AND id=?').bind(now(),uid,b.id)])}
   else if(b.game_id){
    if(b.kind&&!['venue','message','decks','join_request','request_update'].includes(b.kind))return json({error:'Invalid notification category'},400);
-   await db.prepare('UPDATE notifications SET read_at=? WHERE user_id=? AND game_id=? AND read_at IS NULL'+(b.kind?' AND kind=?':'')).bind(now(),uid,b.game_id,...(b.kind?[b.kind]:[])).run();
+   await db.prepare('UPDATE notifications SET read_at=? WHERE user_id=? AND game_id=? AND read_at IS NULL'+(b.kind?" AND (kind=? OR kind='request_update')":'')).bind(now(),uid,b.game_id,...(b.kind?[b.kind]:[])).run();
   }else await db.batch([db.prepare('UPDATE notifications SET read_at=? WHERE user_id=? AND read_at IS NULL').bind(now(),uid),db.prepare('UPDATE cancellation_notices SET read_at=? WHERE user_id=? AND read_at IS NULL').bind(now(),uid)]);
   return json({ok:true});
  }

@@ -164,3 +164,15 @@ header{gap:16px}nav{gap:16px}
 .lobby-admin{margin-top:16px;gap:6px}.lobby-admin button{font-size:11px;padding:7px 9px}.danger{color:#ffb4a8}.full-address{white-space:pre-wrap;overflow-wrap:anywhere;padding:18px;background:var(--mint);border-radius:10px}
 .lobby-deck{display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid var(--line)}.lobby-deck img{object-fit:contain}.lobby-deck small{display:block;color:var(--soft);font-size:12px}.lobby-deck-list{margin-bottom:24px}
 .deck-choices .deck-choice{display:flex;align-items:center;gap:9px}.deck-choice input{margin:0!important}.deck-choice img{object-fit:contain}
+
+.header-menu{position:relative;font-size:13px;white-space:nowrap}
+.header-menu summary{display:flex;align-items:center;gap:9px;cursor:pointer;padding:10px 15px;border:1px solid var(--line);border-radius:7px;list-style:none}
+.header-menu.is-current summary{border-color:var(--accent);color:#f1dbac}
+.header-menu summary:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.header-menu>div{position:absolute;top:calc(100% + 8px);right:0;min-width:190px;padding:8px;background:var(--panel);border:1px solid var(--accent);border-radius:9px;z-index:3;box-shadow:0 8px 24px #0004}
+.header-menu a{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:9px 10px;text-decoration:none;border-radius:5px}
+.header-menu a:hover{background:var(--mint)}
+.event-history{display:grid;gap:10px}.event-history-row{display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:4px;padding:16px 18px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.event-history-row span{font-size:13px;color:var(--soft)}.event-history-row small{font-size:11px;color:var(--soft)}
+@media(max-width:1100px){header nav{order:initial;width:auto;margin-left:auto}#account-menu{margin-left:0}}
+@media(max-width:560px){header nav{margin-left:auto}.header-menu summary{padding:8px 10px}.header-menu>div{left:0;right:auto}header #auth{padding:8px 10px;font-size:12px}}
+.cancellation-notice{display:flex;width:100%;text-align:left;justify-content:flex-start;gap:12px;margin-top:12px}.cancellation-notice>span:nth-child(2){flex:1}.cancellation-notice small{display:block;font-size:12px;color:var(--soft)}
