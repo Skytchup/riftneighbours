@@ -26,8 +26,9 @@ function renderPresence(){
  const button=document.querySelector('#available-now'),ready=Boolean(state?.user.available_until>Date.now()/1000);
  button.setAttribute('aria-pressed',String(ready));button.classList.toggle('is-active',ready);button.disabled=presenceUpdating;
  const select=document.querySelector('#presence-place');
- const places=[...new Map([...(state?.areas||[]),...(state?.availability_locations||[])].map(a=>[a.id,a])).values()];
- select.innerHTML=places.map(a=>`<option value="${esc(a.id)}">${esc(areaLabel(a))}</option>`).join('');select.value=state?.user.presence_area_id||state?.user.area_id||'';select.disabled=presenceUpdating;
+ const places=[...new Map([state?.areas.find(a=>a.id===state.user.area_id),...(state?.availability_locations||[])].filter(Boolean).map(a=>[a.id,state.areas.find(p=>p.id===a.id)||a])).values()];
+ const selected=state?.user.presence_area_id||state?.user.area_id||'';
+ select.innerHTML=(places.some(a=>a.id===selected)?'':'<option value="" disabled>Choose an availability place</option>')+places.map(a=>`<option value="${esc(a.id)}">${esc(areaLabel(a))}</option>`).join('');select.value=state?.user.presence_area_id||state?.user.area_id||'';select.disabled=presenceUpdating;
  button.innerHTML='<strong>'+(ready?'Ready to Play!':'Ready to play? Click here!')+'</strong>';
 
 }
