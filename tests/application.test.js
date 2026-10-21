@@ -493,3 +493,17 @@ test('profile identity and decks save without location fields or changing existi
  assert.equal((await call('me')).data.user.area_id,'b');
  assert.equal((await call('presence','PUT',{available:true})).status,200);
 });
+
+test('walking estimates, map and game context follow the current top-bar place',async()=>{
+ const {call,sql}=await fixture();await call('me');
+ for(const [id,lat] of [['a',1.35],['b',1.351],['c',1.45]])sql.prepare('UPDATE areas SET latitude=?,longitude=? WHERE id=?').run(lat,103.87,id);
+ sql.prepare('UPDATE users SET available_until=?').run(Math.floor(Date.now()/1000)+7200);
+ let places=(await call('condos')).data;assert.equal(places.home.id,'a');assert.ok(places.nearby.some(p=>p.id==='b'&&p.walk.minutes<5));
+ await call('condos/favourites','PUT',{area_id:'c'});await call('presence','PUT',{area_id:'c'});
+ places=(await call('condos')).data;assert.equal(places.home.id,'c');assert.ok(!places.nearby.some(p=>p.id==='a'||p.id==='b'));assert.equal((await call('discovery')).data.home.latitude,1.45);
+ const body={title:'Current place lobby',date:singaporeDate(),start_time:'19:00',venue:'decide',deck_need:'own',extra_decks:false};
+ const id=(await call('games','POST',body)).data.id;assert.equal(sql.prepare('SELECT area_id FROM games WHERE id=?').get(id).area_id,'c');
+ assert.ok((await call('games')).data.games.some(g=>g.id===id));
+ await call('presence','PUT',{area_id:'a'});assert.ok(!(await call('games')).data.games.some(g=>g.id===id));
+ assert.ok((await call('my-games')).data.games.some(g=>g.id===id));
+});
