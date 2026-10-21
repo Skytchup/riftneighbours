@@ -127,7 +127,7 @@ async function handle(req,env){
   else{
    const count=await db.prepare('SELECT COUNT(*) n FROM condo_favourites WHERE user_id=?').bind(uid).first();
    if(count.n>=30&&!await db.prepare('SELECT 1 FROM condo_favourites WHERE user_id=? AND area_id=?').bind(uid,b.area_id).first())return json({error:'You can save up to 30 places in My Places.'},400);
-   await db.prepare('INSERT OR IGNORE INTO condo_favourites(user_id,area_id,created_at) VALUES(?,?,?)').bind(uid,b.area_id,now()).run();
+   await db.batch([db.prepare('INSERT OR IGNORE INTO condo_favourites(user_id,area_id,created_at) VALUES(?,?,?)').bind(uid,b.area_id,now()),db.prepare('UPDATE users SET area_id=? WHERE id=? AND area_id IS NULL').bind(b.area_id,uid)]);
   }
   return json({ok:true});
  }
@@ -158,6 +158,11 @@ async function handle(req,env){
   if(avatar!==null&&avatar!==undefined&&!legends.some(l=>l.id===avatar))return json({error:'Choose a valid Legend avatar.'},400);
   const decks=b.decks===undefined?undefined:prepareDecks(b.decks);
   if(decks===null)return json({error:'Choose a valid Legend for each deck; deck names are optional (60 characters maximum).'},400);
+  if(b.area_id===undefined&&b.onemap_selection===undefined){
+   if(!text(b.username,30))return json({error:'Choose a username.'},400);
+   await db.batch([db.prepare('UPDATE users SET username=?,avatar_legend_id=? WHERE id=?').bind(b.username.trim(),avatar??null,uid),...(decks===undefined?[]:deckStatements(db,uid,decks))]);
+   return json({ok:true,decks:(await db.prepare('SELECT id,name,legend_id,custom_name FROM decks WHERE user_id=?').bind(uid).all()).results});
+  }
   if(!text(b.username,30)||!['casual','learning','teaching'].includes(b.style)||!text(b.area_id,100)||(b.condo_name!==undefined&&(typeof b.condo_name!=='string'||b.condo_name.length>100)))return json({error:'Choose a username, area and play style'},400);
   const planning=planningAreas.find(a=>a.id===b.area_id);
   let selected=planning||await db.prepare('SELECT * FROM areas WHERE id=?').bind(b.area_id).first();
