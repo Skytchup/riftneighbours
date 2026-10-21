@@ -7,7 +7,7 @@ export function mountMap(element,data,onSelect){
  const map=L.map(element,{scrollWheelZoom:false,minZoom:9,maxZoom:18}).setView(home,hasHome?14:11);
  L.tileLayer('https://www.onemap.gov.sg/maps/tiles/Default/{z}/{x}/{y}.png',{minZoom:9,minNativeZoom:11,maxZoom:18,className:'nearby-basemap',attribution:'<img src="https://www.onemap.gov.sg/web-assets/images/logo/om_logo.png" alt="" style="height:20px;width:20px;vertical-align:middle"> <a href="https://www.onemap.gov.sg/" target="_blank" rel="noopener noreferrer">OneMap</a> © contributors | <a href="https://www.sla.gov.sg/" target="_blank" rel="noopener noreferrer">Singapore Land Authority</a>'}).addTo(map);
  const markers=new Map(),positions=[];
- const radiusKm=[2,5,10,20].includes(Number(data.radius))?Number(data.radius):5;
+ const radiusKm=[0.5,1,2,5].includes(Number(data.radius))?Number(data.radius):5;
  const searchCircle=hasHome?L.circle(home,{radius:radiusKm*1000,color:'#FA6906',weight:2,opacity:0.9,fillColor:'#FA6906',fillOpacity:0.08,interactive:false}).addTo(map):null;
  if(hasHome){positions.push(home);const colour=data.self_status==='now'?'#177f70':data.self_status==='usual'?'#d69036':'#163b3b';L.circleMarker(home,{radius:data.self_status?10:6,color:colour,weight:3,fillColor:data.self_status?colour:'#fffaf1',fillOpacity:1}).addTo(map).bindPopup('Your selected place · '+esc(data.home.name)+(data.self_status==='now'?'<br>You are Ready to Play':data.self_status==='usual'?'<br>Your schedule matches this slot':''))}
  for(const group of data.groups){
