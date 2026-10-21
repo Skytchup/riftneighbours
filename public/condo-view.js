@@ -19,37 +19,51 @@ export async function showCondos(o){
 
  let scheduleRequest=0;
  const known=new Map([...data.favourites,...data.nearby].map(a=>[a.id,a]));
- async function select(id){
+ async function select(id,openAvailability=false){
   selectedId=id;const request=++scheduleRequest,panel=app.querySelector('#condo-schedule');
   panel.innerHTML='<p class="map-note">Loading usual availability…</p>';
   try{
    const schedule=demo?{area:known.get(id)||{id,name:'Sample Place (fictional)'},cells:slots.flatMap(([slot],i)=>days.map((_,day)=>({slot,day,count:(day+i)%3===0?i+2:0})))}:await api('condos/'+encodeURIComponent(id)+'/schedule');
    if(!valid()||request!==scheduleRequest)return;
-   const max=Math.max(1,...schedule.cells.map(c=>c.count)),home=schedule.area.id===data.home?.id,favourite=data.favourites.some(a=>a.id===id);
+   const max=Math.max(1,...schedule.cells.map(c=>c.count));let favourite=data.favourites.some(a=>a.id===id);
    panel.innerHTML=`<div class="row between"><div><h2>${esc(schedule.area.name)}</h2><p class="map-note">Usual availability · Singapore time</p></div><div class="row"><button id="toggle-condo-favourite" >${favourite?'Remove from My Places':'Add to My Places'}</button>${favourite?'<button id="edit-place-availability" class="primary" type="button" aria-expanded="false" aria-controls="place-availability-editor">Update my Availability at this location</button>':''}</div></div><div class="condo-timetable-scroll"><table class="condo-timetable"><caption class="sr-only">Total people usually available by day and time</caption><thead><tr><th scope="col"></th>${days.map(day=>`<th scope="col">${day}</th>`).join('')}</tr></thead><tbody>${slots.map(([slot,label,time])=>`<tr><th scope="row">${label}<small>${time}</small></th>${days.map((day,index)=>{const count=schedule.cells.find(c=>c.day===index&&c.slot===slot)?.count||0;return `<td><span class="condo-count ${count?'has-people':''}" style="--density:${0.15+count/max*0.7}" aria-label="${day} ${label}: ${count} people">${count}</span></td>`}).join('')}</tr>`).join('')}</tbody></table></div><p class="compact muted">Anonymous totals only · Includes your saved schedule · No names or individual schedules</p>`;
    panel.querySelector('#toggle-condo-favourite').onclick=async event=>{
     event.target.disabled=true;
     try{if(!demo){await api('condos/favourites',favourite?'DELETE':'PUT',{area_id:id});const fresh=await api('me');if(!valid())return;Object.assign(state,fresh);}else{const saved=state.condo_favourites??data.favourites.filter(a=>!a.is_home);state.condo_favourites=favourite?saved.filter(a=>a.id!==id):[...saved,schedule.area];state.my_places=state.condo_favourites;o.persist()}o.onRefresh()}
     catch(error){o.toast(error.message);event.target.disabled=false}
    };
-   panel.querySelector('#edit-place-availability')?.addEventListener('click',event=>{
-    if(panel.querySelector('#place-availability-editor')){panel.querySelector('#place-availability-editor').remove();event.target.setAttribute('aria-expanded','false');return}
-    event.target.setAttribute('aria-expanded','true');
+   function openEditor(){
+    const editButton=panel.querySelector('#edit-place-availability');
+    if(panel.querySelector('#place-availability-editor')){panel.querySelector('#place-availability-editor').remove();editButton?.setAttribute('aria-expanded','false');return}
+    editButton?.setAttribute('aria-expanded','true');
     const records=state.location_preferences||state.preferences.map(p=>({...p,area_id:state.user.area_id}));
     const selected=records.filter(p=>p.area_id===id).map(({day,slot})=>({day,slot}));
     const editor=document.createElement('section');editor.id='place-availability-editor';
-    editor.innerHTML=`<h3>Your availability at ${esc(schedule.area.name)}</h3><p class="compact muted">Select your usual free times · Singapore time</p><div class="schedule"><span></span>${days.map(day=>`<span class="day">${day}</span>`).join('')}${slots.map(([slot,label,time])=>`<span class="slotlabel">${label}<br>${time}</span>${days.map((day,index)=>{const active=selected.some(p=>p.day===index&&p.slot===slot);return `<button type="button" data-availability-day="${index}" data-availability-slot="${slot}" aria-label="${day} ${label}" aria-pressed="${active}">${active?'✓':'·'}</button>`}).join('')}`).join('')}</div><p class="notice">Your schedule adds to anonymous player counts at this place; your individual timetable stays private. Preferences stop contributing after 60 days unless you save them again.</p><div class="row"><button id="save-place-availability" class="primary" type="button">Save availability</button><button id="cancel-place-availability" type="button">Cancel</button></div>`;
-    panel.append(editor);
+    editor.innerHTML=`<h3>Your availability at ${esc(schedule.area.name)}</h3><p class="compact muted">Select your usual free times · Singapore time</p><div class="schedule"><span></span>${days.map(day=>`<span class="day">${day}</span>`).join('')}${slots.map(([slot,label,time])=>`<span class="slotlabel">${label}<br>${time}</span>${days.map((day,index)=>{const active=selected.some(p=>p.day===index&&p.slot===slot);return `<button type="button" data-availability-day="${index}" data-availability-slot="${slot}" aria-label="${day} ${label}" aria-pressed="${active}">${active?'✓':'·'}</button>`}).join('')}`).join('')}</div><p class="notice">Your schedule adds to anonymous player counts at this place; your individual timetable stays private. Preferences stop contributing after 60 days unless you save them again.</p><div class="row"><button id="save-place-availability" class="primary" type="button">${favourite?'Save availability':'Add to My Places & save availability'}</button><button id="cancel-place-availability" type="button">Cancel</button></div>`;
+    panel.querySelector('.condo-timetable-scroll').before(editor);
     editor.querySelectorAll('[data-availability-day]').forEach(button=>button.onclick=()=>{const day=Number(button.dataset.availabilityDay),slot=button.dataset.availabilitySlot,index=selected.findIndex(p=>p.day===day&&p.slot===slot);if(index<0)selected.push({day,slot});else selected.splice(index,1);button.setAttribute('aria-pressed',String(index<0));button.textContent=index<0?'✓':'·'});
-    editor.querySelector('#cancel-place-availability').onclick=()=>{editor.remove();event.target.setAttribute('aria-expanded','false')};
+    editor.querySelector('#cancel-place-availability').onclick=()=>{editor.remove();editButton?.setAttribute('aria-expanded','false')};
     editor.querySelector('#save-place-availability').onclick=async saveEvent=>{
      editor.querySelectorAll('button').forEach(button=>button.disabled=true);
-     try{if(!demo)await api('preferences','PUT',{area_id:id,preferences:selected});if(!valid())return;
+     try{
+      if(!favourite){
+       if(!demo)await api('condos/favourites','PUT',{area_id:id});
+       if(!valid())return;
+       favourite=true;data.favourites.push(schedule.area);
+       state.my_places=[...(state.my_places||[]).filter(p=>p.id!==id),schedule.area];state.availability_locations=state.my_places;
+       panel.querySelector('#toggle-condo-favourite').textContent='Remove from My Places';
+       editor.querySelector('#save-place-availability').textContent='Save availability';
+      }
+      if(!demo)await api('preferences','PUT',{area_id:id,preferences:selected});if(!valid())return;
+      if(!demo){const fresh=await api('me');if(!valid())return;Object.assign(state,fresh)}
+
       state.location_preferences=[...records.filter(p=>p.area_id!==id),...selected.map(p=>({...p,area_id:id}))];if(id===state.user.area_id)state.preferences=selected;
       o.persist();o.toast('Availability saved.');o.onRefresh();
      }catch(error){o.toast(error.message);editor.querySelectorAll('button').forEach(button=>button.disabled=false)}
     };
-   });
+   }
+   panel.querySelector('#edit-place-availability')?.addEventListener('click',openEditor);
+   if(openAvailability||!favourite)openEditor();
    app.querySelectorAll('[data-open-condo]').forEach(button=>{const current=button.dataset.openCondo===id;button.classList.toggle('selected',current);button.setAttribute('aria-pressed',String(current))});
   }catch(error){if(valid()&&request===scheduleRequest)panel.innerHTML=`<p class="notice error">${esc(error.message)}</p>`}
  }
@@ -61,11 +75,12 @@ export async function showCondos(o){
   try{
    const found=demo?{results:[...known.values()].filter(a=>a.name.toLowerCase().includes(queryText.toLowerCase())).map(a=>({...a,saved:true}))}:await api('condos/search?q='+encodeURIComponent(queryText));
    if(!valid())return;
-   results.innerHTML=(found.message?`<p class="map-note">${esc(found.message)}</p>`:'')+(found.results.length?found.results.map((a,index)=>`<button type="button" class="location-result" data-search-index="${index}"><strong>${esc(a.name)}</strong><span>${esc(a.address)}</span><small>View anonymous availability →</small></button>`).join(''):'<p class="map-note">No matches. Try a development name or postal code.</p>')+'<p class="compact muted">Search data: OneMap / Singapore Land Authority. Results include homes, workplaces and public places.</p>';
+   results.innerHTML=(found.message?`<p class="map-note">${esc(found.message)}</p>`:'')+(found.results.length?found.results.map((a,index)=>`<button type="button" class="location-result" data-search-index="${index}"><strong>${esc(a.name)}</strong><span>${esc(a.address)}</span><small>Set your availability &amp; view player counts →</small></button>`).join(''):'<p class="map-note">No matches. Try a development name or postal code.</p>')+'<p class="compact muted">Search data: OneMap / Singapore Land Authority. Results include homes, workplaces and public places.</p>';
    results.querySelectorAll('[data-search-index]').forEach(resultButton=>resultButton.onclick=async()=>{
     const choice=found.results[Number(resultButton.dataset.searchIndex)];resultButton.disabled=true;
-    try{const area=choice.saved?choice:(await api('condos/select','POST',{query:queryText,id:choice.id})).area;known.set(area.id,area);await select(area.id)}catch(error){o.toast(error.message)}finally{resultButton.disabled=false}
+    try{const area=choice.saved?choice:(await api('condos/select','POST',{query:queryText,id:choice.id})).area;known.set(area.id,area);await select(area.id,true)}catch(error){o.toast(error.message)}finally{resultButton.disabled=false}
    });
+   const first=results.querySelector('[data-search-index]');if(first)await first.onclick();
   }catch(error){if(valid())results.innerHTML=`<p class="notice error">${esc(error.message)}</p>`}finally{button.disabled=false}
  };
  if(selectedId)await select(selectedId);
