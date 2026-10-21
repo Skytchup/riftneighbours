@@ -25,7 +25,7 @@ export async function showNearby(o){
  <div class="discovery-layout"><div class="map-panel"><div id="nearby-map" aria-label="Map of nearby players by place"></div><div class="map-caption"><span><i class="status-dot now"></i> Ready to Play</span><span><i class="status-dot usual"></i> Usually available</span><span>Selected places · SGT</span></div></div><aside class="player-panel"><div class="row between"><h2>Nearby players</h2><button id="refresh-map" class="quiet">Refresh</button></div><div id="player-list"></div></aside></div>
  ${needsLocation?'<p class="map-note">Choose your selected place using OneMap in <a href="#profile">Profile</a> to centre the map and search by distance. Without a selected place, results stay within your neighbourhood.</p>':''}
  ${data.unmapped?'<p class="map-note">Some players do not yet have a map location.</p>':''}
- <p class="compact muted">${data.slot?'Amber matches the current '+esc(data.slot)+' slot in saved schedules.':'There is no scheduled slot before 6 am; only Ready to Play appears.'} Scheduled availability is a preference, not a confirmation. Counts include you.</p>
+ <p class="compact muted">See multiple players available but no game yet? Create a lobby to start discussing with others!</p>
  <div class="row between section games-heading"><h2>Nearby games</h2><button class="primary" id="suggest">Create a Game</button></div><div id="nearby-games-list"><p class="map-note" role="status">Loading games…</p></div>`;
  function gamesMarkup(games,error){return error?'<p class="notice">'+esc(error)+'</p>':games.length?'<div class="grid">'+games.map(o.lobbyCard).join('')+'</div>':'<div class="empty"><p>No games yet. Create a lobby and find a table together.</p></div>'}
  gamesPromise.then(result=>{
