@@ -213,3 +213,20 @@ header{gap:16px}nav{gap:16px}
 
 /* Keep the basemap quiet while retaining full-colour player markers and search radius. */
 #nearby-map{background:#ededed}#nearby-map .nearby-basemap{filter:grayscale(1) brightness(1.08) contrast(.85)}
+
+/* Compact location cards; gold identifies the selected place only. */
+main:has(>.condo-search){max-width:1240px;padding:20px 20px 40px}
+.condo-search{margin:8px 0 18px}.condo-search h1{margin-bottom:14px}
+.condo-section{margin:18px 0}.condo-section>.row{margin-bottom:10px}
+.condo-cards{grid-template-columns:repeat(auto-fill,minmax(225px,1fr));gap:10px;align-items:start}
+.condo-cards .condo-card{width:100%;min-height:0;padding:10px 12px;border:3px solid #183b53;border-radius:10px;box-shadow:none}
+.condo-cards .condo-card:not(.selected):hover,.condo-cards .condo-card:not(.selected):focus-visible{border-color:#183b53}
+.condo-cards .condo-card.selected,.condo-cards .condo-card.selected:hover,.condo-cards .condo-card.selected:focus-visible{border:3px solid #c7a96b;background:#1d4050;box-shadow:none}
+.condo-card strong{font-size:13px;line-height:1.3}
+.condo-card .row{gap:4px 8px}
+.condo-card .condo-address{margin:4px 0 6px;font-size:10px;line-height:1.35}
+.condo-card .condo-address:empty{display:none}
+.condo-card .condo-status{font-size:10px}
+.condo-schedule-panel{margin:18px 0;padding:18px}
+.closest-condos{margin-top:22px}
+@media(max-width:560px){main:has(>.condo-search){padding:16px 12px 32px}.condo-cards{grid-template-columns:1fr}.condo-schedule-panel{padding:14px 10px}}
