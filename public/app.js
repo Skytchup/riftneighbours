@@ -115,7 +115,7 @@ document.querySelector('#kopi-button').onclick=()=>showModal('<div class="kopi-n
 document.querySelector('#available-now').onclick=togglePresence;
 document.querySelector('#presence-place').onchange=async event=>{
  if(!state||presenceUpdating)return;const uid=state.user.id,area_id=event.target.value;presenceUpdating=true;event.target.disabled=true;
- try{const result=demo?{presence_area_id:area_id}:await api('presence','PUT',{area_id});if(state?.user.id!==uid)return;Object.assign(state.user,result);persist();if(location.hash==='#nearby')await render();}
+ try{const result=demo?{presence_area_id:area_id}:await api('presence','PUT',{area_id});if(state?.user.id!==uid)return;Object.assign(state.user,result);persist();if(['#nearby','#condos','#games'].includes(location.hash))await render();}
  catch(error){toast(error.message)}finally{presenceUpdating=false;renderPresence()}
 };
 setInterval(()=>{if(state&&!document.hidden)renderPresence()},30000);
