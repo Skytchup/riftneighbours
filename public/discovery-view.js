@@ -35,7 +35,7 @@ export async function showNearby(o){
  function draw(){
   const groups=visibleGroups(data,app.querySelector('#map-filter').value),list=app.querySelector('#player-list');
   list.innerHTML=groups.length?groups.map(g=>`<button type="button" class="player-location" data-map-location="${esc(g.id)}"><span class="row between"><strong>${esc(g.name)}</strong><small>${g.distance==null?'':g.distance+' km'}</small></span><span class="player-address">${esc(g.address)}</span><span class="player-line"><i class="status-dot now"></i>${g.ready_count} Ready to Play</span><span class="player-line"><i class="status-dot usual"></i>${g.usual_count} usually available</span></button>`).join(''):'<div class="empty player-empty"><h3>No players here yet.</h3><p>Try a wider radius, or mark yourself Ready to Play.</p><a href="#schedule">Edit my schedule →</a></div>';
-  activeMap?.destroy();activeMap=mountMap(app.querySelector('#nearby-map'),{...data,groups},id=>{list.querySelectorAll('[data-map-location]').forEach(el=>el.classList.toggle('selected',el.dataset.mapLocation===id))});
+  activeMap?.destroy();activeMap=mountMap(app.querySelector('#nearby-map'),{...data,radius,groups},id=>{list.querySelectorAll('[data-map-location]').forEach(el=>el.classList.toggle('selected',el.dataset.mapLocation===id))});
   list.querySelectorAll('[data-map-location]').forEach(button=>button.onclick=()=>activeMap.focus(button.dataset.mapLocation));
  }
  app.querySelector('#map-filter').value=chosenFilter;draw();
