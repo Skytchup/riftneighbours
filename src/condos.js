@@ -15,7 +15,8 @@ export async function condoStats(db,uid){
  GROUP BY a.id`).bind(time,time-86400*60,day,slot,time-86400*60,uid,uid).all()).results;
 }
 export async function condoOverview(env,user){
- const home=user.area_id&&!user.area_id.startsWith('sg-pa-')?await env.DB.prepare('SELECT * FROM areas WHERE id=?').bind(user.area_id).first():null;
+ const currentAreaId=user.presence_area_id||user.area_id;
+ const home=currentAreaId&&!currentAreaId.startsWith('sg-pa-')?await env.DB.prepare('SELECT * FROM areas WHERE id=?').bind(currentAreaId).first():null;
  const rows=await condoStats(env.DB,user.id);
  const favourites=(await env.DB.prepare('SELECT area_id FROM condo_favourites WHERE user_id=? ORDER BY created_at,area_id').bind(user.id).all()).results.map(r=>r.area_id);
 
