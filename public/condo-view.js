@@ -1,7 +1,7 @@
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const slots=[['morning','Morning','6 am–12 pm'],['lunch','Lunch break','12–2 pm'],['afternoon','Afternoon','2–6 pm'],['evening','Evening','6–9 pm'],['late','Late evening','9 pm–midnight']];
-let selectedId=null,queryText='';
+let queryText='';
 function demoData(o){
  const home={id:o.state.user.area_id||'demo-east',name:'Sample Gardens (fictional)',address:'Demo location',is_home:true,available_now:1,usual_people:5};
  return {home,favourites:[home,...(o.state.condo_favourites??[{id:'demo-favourite',name:'Sample Court (fictional)',address:'Demo location',available_now:0,usual_people:3}]).filter(a=>a.id!==home.id)],can_walk:true,nearby:[{id:'demo-walk',name:'Sample Residences (fictional)',address:'Demo location',available_now:2,usual_people:4,walk:{minutes:8,estimated:false}},{id:'demo-favourite',name:'Sample Court (fictional)',address:'Demo location',available_now:0,usual_people:3,walk:{minutes:12,estimated:true}}]};
@@ -11,15 +11,20 @@ function condoCard(area){return `<button class="condo-card" type="button" data-o
 export async function showCondos(o){
  const {app,demo,api,valid,state}=o;
  const data=demo?demoData(o):await api('condos');if(!valid())return;
- if(!selectedId)selectedId=data.home?.id||data.favourites[0]?.id||null;
+ let selectedId=null;
  app.innerHTML=`<section class="condo-search"><h1>Locations &amp; Availability</h1><form id="condo-search-form" class="row"><label class="condo-search-label"><span class="sr-only">Search places</span><input id="condo-query" type="search" minlength="3" maxlength="100" placeholder="Place name or postal code" value="${esc(queryText)}" required autocomplete="off"></label><button class="primary" type="submit">Search</button></form><div id="condo-search-results" aria-live="polite"></div></section>
+ <section class="all-availability-section"><button id="toggle-all-availability" type="button" aria-expanded="false" aria-controls="all-availability-panel">All my availability</button><section id="all-availability-panel" class="condo-schedule-panel" hidden></section></section>
  <section class="condo-section"><div class="row between"><h2>My Places</h2><small class="muted">Your saved locations</small></div><div class="condo-cards">${data.favourites.length?data.favourites.map(condoCard).join(''):'<p class="map-note">Search for a location to add to My Places, or <a href="#profile">choose a meeting place</a>.</p>'}</div></section>
- <section id="condo-schedule" class="condo-schedule-panel" aria-live="polite"><p class="map-note">Select a place to see usual availability.</p></section>
+ <section id="condo-schedule" class="condo-schedule-panel" aria-live="polite" hidden><p class="map-note">Select a place to see usual availability.</p></section>
  <section class="condo-section closest-condos"><div class="row between"><h2>Places within walking distance</h2><span class="walk-badge">About 15 min on foot</span></div><p class="map-note">${data.nearby.some(a=>a.available_now>0)?'Ready to Play comes first.':data.nearby.length?'No one is ready to play nearby. These places have the most usual availability.':'Nearby places with shared availability will appear here.'}</p>${!data.can_walk?'<p class="notice">Choose your selected place using OneMap in <a href="#profile">Profile</a> to find places within walking distance.</p>':data.nearby.length?`<div class="condo-cards">${data.nearby.map(condoCard).join('')}</div>`:'<div class="empty"><p>No places with shared availability were found within a 15-minute walk.</p></div>'}<p class="compact muted">${data.home?'Distances from your current location: '+esc(data.home.name)+'. ':''}Walking times are distance estimates, not route directions.</p></section>`;
 
  let scheduleRequest=0;
  const known=new Map([...data.favourites,...data.nearby].map(a=>[a.id,a]));
+ function closePlace(){selectedId=null;++scheduleRequest;app.querySelector('#condo-schedule').hidden=true;app.querySelectorAll('[data-open-condo]').forEach(button=>{button.classList.remove('selected');button.setAttribute('aria-pressed','false')})}
  async function select(id,openAvailability=false){
+  if(selectedId===id&&!openAvailability){closePlace();return}
+  app.querySelector('#all-availability-panel').hidden=true;app.querySelector('#toggle-all-availability').setAttribute('aria-expanded','false');
+  app.querySelector('#condo-schedule').hidden=false;
   selectedId=id;const request=++scheduleRequest,panel=app.querySelector('#condo-schedule');
   panel.innerHTML='<p class="map-note">Loading usual availability…</p>';
   try{
@@ -69,6 +74,37 @@ export async function showCondos(o){
  }
  function bindCards(root){root.querySelectorAll('[data-open-condo]').forEach(button=>button.onclick=()=>select(button.dataset.openCondo))}
  bindCards(app);
+ function renderAllAvailability(){
+  const panel=app.querySelector('#all-availability-panel'),places=state.my_places||data.favourites;
+  const records=state.location_preferences||state.preferences.map(p=>({...p,area_id:state.user.area_id}));
+  panel.innerHTML=`<h2>All my availability</h2><p class="compact muted">Select a timeslot to choose where you’re usually available · Singapore time</p>${places.length?`<div class="all-grid-scroll"><div class="schedule all-availability-grid"><span></span>${days.map(day=>`<span class="day">${day}</span>`).join('')}${slots.map(([slot,label,time])=>`<span class="slotlabel">${label}<br>${time}</span>${days.map((day,index)=>{const selected=places.filter(place=>records.some(p=>p.area_id===place.id&&p.day===index&&p.slot===slot));return `<button type="button" data-all-day="${index}" data-all-slot="${slot}" aria-label="${day} ${label}: ${esc(selected.map(p=>p.name).join(', ')||'No availability')}" aria-pressed="${selected.length>0}">${selected.length?selected.map(p=>`<span>${esc(p.name)}</span>`).join(''):'+'}</button>`}).join('')}`).join('')}</div></div><div id="all-slot-editor"></div>`:'<p>Add a location to My Places first.</p>'}`;
+  panel.querySelectorAll('[data-all-day]').forEach(button=>button.onclick=()=>{
+   const day=Number(button.dataset.allDay),slot=button.dataset.allSlot,editor=panel.querySelector('#all-slot-editor');
+   panel.querySelectorAll('[data-all-day]').forEach(b=>b.classList.toggle('editing-slot',b===button));
+   editor.innerHTML=`<h3>${days[day]} · ${slots.find(s=>s[0]===slot)[1]}</h3><p class="compact muted">Choose one or more places. Clear a place to remove your availability for this slot.</p><div class="all-slot-places">${places.map(place=>`<label><input type="checkbox" value="${esc(place.id)}" ${records.some(p=>p.area_id===place.id&&p.day===day&&p.slot===slot)?'checked':''}>${esc(place.name)}</label>`).join('')}</div><div class="row"><button id="save-all-slot" class="primary" type="button">Save timeslot</button><button id="cancel-all-slot" type="button">Cancel</button></div>`;
+   editor.querySelector('#cancel-all-slot').onclick=()=>{editor.innerHTML='';button.classList.remove('editing-slot')};
+   editor.querySelector('#save-all-slot').onclick=async()=>{
+    const selected=new Set([...editor.querySelectorAll('input:checked')].map(input=>input.value));editor.querySelectorAll('button,input').forEach(el=>el.disabled=true);
+    let saved=0;
+    try{
+     for(const place of places){
+      const current=state.location_preferences||records,exists=current.some(p=>p.area_id===place.id&&p.day===day&&p.slot===slot);
+      if(exists===selected.has(place.id))continue;
+      const preferences=current.filter(p=>p.area_id===place.id&&!(p.day===day&&p.slot===slot)).map(({day,slot})=>({day,slot}));
+      if(selected.has(place.id))preferences.push({day,slot});
+      if(!demo)await api('preferences','PUT',{area_id:place.id,preferences});if(!valid())return;
+      state.location_preferences=[...current.filter(p=>p.area_id!==place.id),...preferences.map(p=>({...p,area_id:place.id}))];if(place.id===state.user.area_id)state.preferences=preferences;
+      saved++;o.persist();
+     }
+     o.toast('Availability saved.');if(valid())renderAllAvailability();
+    }catch(error){o.toast((saved?'Some places were saved. Retry to finish. ':'')+error.message);editor.querySelectorAll('button,input').forEach(el=>el.disabled=false)}
+   };
+  });
+ }
+ app.querySelector('#toggle-all-availability').onclick=event=>{
+  const panel=app.querySelector('#all-availability-panel'),open=panel.hidden;
+  closePlace();panel.hidden=!open;event.currentTarget.setAttribute('aria-expanded',String(open));if(open)renderAllAvailability();
+ };
  const form=app.querySelector('#condo-search-form');
  form.onsubmit=async event=>{
   event.preventDefault();queryText=app.querySelector('#condo-query').value.trim();const results=app.querySelector('#condo-search-results'),button=form.querySelector('button');button.disabled=true;results.textContent='Searching places…';
@@ -83,5 +119,5 @@ export async function showCondos(o){
    const first=results.querySelector('[data-search-index]');if(first)await first.onclick();
   }catch(error){if(valid())results.innerHTML=`<p class="notice error">${esc(error.message)}</p>`}finally{button.disabled=false}
  };
- if(selectedId)await select(selectedId);
+
 }
