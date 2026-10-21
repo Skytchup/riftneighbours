@@ -4,7 +4,7 @@ const app=document.querySelector('#app'),modal=document.querySelector('#modal'),
 const labels={morning:'Morning',lunch:'Lunch break',afternoon:'Afternoon',evening:'Evening',late:'Late evening'},times={morning:'6 am–12 pm',lunch:'12–2 pm',afternoon:'2–6 pm',evening:'6–9 pm',late:'9 pm–midnight'},days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Singapore',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let demo=false,state=null,scope='area',gameList=[],myGames=[],view=0,timer,radius=5;
+let demo=false,state=null,scope='area',gameList=[],myGames=[],view=0,timer,radius=1;
 function initial(){return {user:{id:'demo-me',username:'Alex',area_id:'demo-east',style:'casual',share_condo:0},areas:[{id:'demo-east',name:'Sample Gardens (fictional)',neighbourhood:'East neighbourhood'},{id:'demo-central',name:'Sample Estate (fictional)',neighbourhood:'Central neighbourhood'}],preferences:[{day:1,slot:'evening'},{day:3,slot:'evening'},{day:5,slot:'late'}],decks:[{name:'Annie'}],confirmations:[]}}
 function persist(){if(demo)try{localStorage.setItem('rn-demo',JSON.stringify({state,gameList,myGames}))}catch{}}
 function toast(s){const el=document.querySelector('#toast');el.textContent=s;el.style.display='block';clearTimeout(timer);timer=setTimeout(()=>el.style.display='none',4000)}
