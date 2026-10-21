@@ -102,7 +102,7 @@ async function handle(req,env){
  if(p==='/api/discovery'&&req.method==='GET'){
   if(!user.area_id)return json({error:'Choose your location in Profile first.'},400);
   const radius=Number(url.searchParams.get('radius')||5);
-  if(![2,5,10,20].includes(radius))return json({error:'Choose a valid search radius.'},400);
+  if(![0.5,1,2,5].includes(radius))return json({error:'Choose a valid search radius.'},400);
   return json(await discover(env,user,{scope:url.searchParams.get('scope')==='condo'?'condo':'area',radius}));
  }
  if(p==='/api/logout'&&req.method==='POST'){await db.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await hash(cookies(req).rn_session||'')).run();return json({ok:true},200,{'set-cookie':cookie('rn_session','',0)})}
