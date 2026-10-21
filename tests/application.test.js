@@ -123,7 +123,8 @@ test('map discovery uses current SGT schedule, anonymous defaults, exact coordin
  sql.prepare('UPDATE users SET available_until=? WHERE id=?').run(Math.floor(Date.now()/1000)+7200,'other');
  for(const uid of ['other','third','far'])sql.prepare('INSERT INTO preferences VALUES(?,?,?,?)').run(uid,singaporeDay(singaporeDate()),'evening',Math.floor(Date.now()/1000));
  let found=await call('discovery');assert.equal(found.status,200);assert.equal(found.data.groups.length,2);
- assert.equal((await call('discovery?radius=20')).data.groups.length,3);
+ for(const radius of [0.5,1,2,5]){const result=await call('discovery?radius='+radius);assert.equal(result.status,200);assert.equal(result.data.groups.length,radius<2?1:2)}
+ assert.equal((await call('discovery?radius=20')).status,400);assert.equal((await call('discovery?radius=10')).status,400);
  assert.equal(found.data.groups.reduce((n,g)=>n+g.ready_count,0),1);assert.equal(found.data.groups.reduce((n,g)=>n+g.usual_count,0),2);assert.ok(!JSON.stringify(found.data).includes('secret-name'));assert.ok(found.data.groups.every(g=>!('players' in g)));
  assert.equal(found.data.groups.reduce((n,g)=>n+g.total_count,0),2); // self and distant player excluded
  assert.equal((await call('discovery?scope=condo')).data.groups.length,1);
