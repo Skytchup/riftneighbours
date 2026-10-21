@@ -125,7 +125,7 @@ for(const id of ['play-menu','account-menu'])document.querySelector('#'+id).addE
 document.querySelectorAll('nav a,#account-menu a').forEach(a=>a.addEventListener('click',event=>{if(a.hash===location.hash){event.preventDefault();render()}}));
 setInterval(refreshNotifications,30000);
 window.addEventListener('focus',refreshNotifications);
-document.querySelector('#kopi-button').onclick=()=>showModal('<div class="kopi-note"><span class="kopi-illustration" aria-hidden="true">☕ 🍞</span><h2>A little kopi goes a long way.</h2><p>Enjoying RiftNeighbours? You could fuel the human behind it with a kopi.</p><p>Feeling extra generous? A whole kaya toast set might turn “I’ll fix that later” into “already working on it!”</p><p class="muted compact">No paywalls. No special treatment. Just a well-fed neighbour dreaming up the next little improvement.</p><p class="compact">For now, your feedback and a game with a neighbour are lovely ways to support the project, too.</p></div>');
+document.querySelector('#kopi-button').onclick=()=>showModal('<div class="kopi-note"><span class="kopi-illustration" aria-hidden="true">☕</span><h2>A little kopi goes a long way.</h2><p>Enjoying RiftNeighbours? You could fuel the human behind it with S$1.50 via PayNow for a Kopi O Kosong!</p><p class="compact">Of course, your feedback and a game with a neighbour are lovely ways to support the project, too.</p></div>');
 document.querySelector('#available-now').onclick=togglePresence;
 document.querySelector('#presence-place').onchange=async event=>{
  if(!state||presenceUpdating)return;const uid=state.user.id,area_id=event.target.value;presenceUpdating=true;event.target.disabled=true;
