@@ -9,7 +9,7 @@ export function mountMap(element,data,onSelect){
  const markers=new Map(),positions=[];
  const radiusKm=[0.5,1,2,5].includes(Number(data.radius))?Number(data.radius):1;
  const searchCircle=hasHome?L.circle(home,{radius:radiusKm*1000,color:'#FA6906',weight:2,opacity:0.9,fillColor:'#FA6906',fillOpacity:0.08,interactive:false}).addTo(map):null;
- if(hasHome){positions.push(home);const colour=data.self_status==='now'?'#177f70':data.self_status==='usual'?'#d69036':'#163b3b';L.circleMarker(home,{radius:data.self_status?10:6,color:colour,weight:3,fillColor:data.self_status?colour:'#fffaf1',fillOpacity:1}).addTo(map).bindPopup('Your selected place · '+esc(data.home.name)+(data.self_status==='now'?'<br>You are Ready to Play':data.self_status==='usual'?'<br>Your schedule matches this slot':''))}
+ if(hasHome){positions.push(home);L.circleMarker(home,{radius:5,color:'#FA6906',weight:2,fillColor:'#FA6906',fillOpacity:1}).addTo(map).bindPopup('Your selected place · '+esc(data.home.name)+(data.self_status==='now'?'<br>You are Ready to Play':data.self_status==='usual'?'<br>Your schedule matches this slot':''),{className:'selected-place-popup',maxWidth:220})}
  for(const group of data.groups){
   const available=group.ready_count;
   const marker=L.marker([group.latitude,group.longitude],{icon:L.divIcon({className:'player-marker-wrap',html:`<span class="player-marker ${available?'is-now':'is-usual'}">${group.total_count}</span>`,iconSize:[42,42],iconAnchor:[21,42]}),title:group.name+' · '+group.total_count+' players',alt:group.name});
