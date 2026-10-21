@@ -210,3 +210,6 @@ header{gap:16px}nav{gap:16px}
 #presence-place{width:auto;max-width:230px;min-width:110px;margin:0;padding:9px 28px 9px 10px;font-size:.8rem;background-color:#10263a;border:1px solid #8c7547;color:#f1e8d4;border-radius:6px}#presence-place[hidden]{display:none}@media(max-width:600px){#presence-place{max-width:170px;flex:1}}
 
 .presence-place-label{display:flex;align-items:center;gap:8px;margin:0;font-size:.8rem;color:#f1e8d4;min-width:0}.presence-place-label>span{white-space:nowrap}.presence-place-label:has(#presence-place[hidden]){display:none}@media(max-width:600px){.presence-place-label{flex-wrap:wrap;gap:4px}}
+
+/* Keep the basemap quiet while retaining full-colour player markers and search radius. */
+#nearby-map{background:#ededed}#nearby-map .nearby-basemap{filter:grayscale(1) brightness(1.08) contrast(.85)}
