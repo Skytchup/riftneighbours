@@ -6,6 +6,7 @@
   "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": ["/api/*", "/auth/*"] },
   "triggers": { "crons": ["0 16 * * *"] },
   "vars": {
+    "PUBLIC_SIGNUP": "true",
     "GOOGLE_CLIENT_ID": "834502335714-gqdgcjjjnnaleugcbvlr4lnp0psa1c9j.apps.googleusercontent.com",
     "APP_ORIGIN": "https://riftneighbours.coulomb-alexandre.workers.dev"
   },
