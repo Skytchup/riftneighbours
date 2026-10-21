@@ -481,3 +481,15 @@ test('My Places gate both schedules and presence and removal clears contribution
  await call('condos/favourites','DELETE',{area_id:'a'});me=(await call('me')).data;assert.equal(me.my_places.length,0);
  assert.equal((await call('preferences','PUT',{preferences:[{day:1,slot:'morning'}]})).status,400);
 });
+
+test('profile identity and decks save without location fields or changing existing places',async()=>{
+ const {call,sql}=await fixture();await call('me');const before=(await call('me')).data;
+ const saved=await call('profile','PUT',{username:'New name',avatar_legend_id:null,decks:[]});assert.equal(saved.status,200);
+ const after=(await call('me')).data;assert.equal(after.user.username,'New name');assert.equal(after.user.area_id,before.user.area_id);assert.equal(after.user.style,before.user.style);assert.deepEqual(after.my_places,before.my_places);
+ sql.prepare('UPDATE users SET area_id=NULL WHERE id=?').run('me');
+ assert.equal((await call('profile','PUT',{username:'New member',decks:[]})).status,200);
+ assert.equal((await call('me')).data.user.area_id,null);
+ assert.equal((await call('condos/favourites','PUT',{area_id:'b'})).status,200);
+ assert.equal((await call('me')).data.user.area_id,'b');
+ assert.equal((await call('presence','PUT',{available:true})).status,200);
+});
