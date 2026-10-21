@@ -21,6 +21,12 @@ export async function ensureSchema(db){
    await db.prepare(`CREATE TABLE IF NOT EXISTS place_preferences (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,area_id TEXT NOT NULL REFERENCES areas(id) ON DELETE CASCADE,day INTEGER NOT NULL CHECK(day BETWEEN 0 AND 6),slot TEXT NOT NULL CHECK(slot IN ('morning','lunch','afternoon','evening','late')),updated_at INTEGER NOT NULL,PRIMARY KEY(user_id,area_id,day,slot))`).run();
    await db.prepare('CREATE INDEX IF NOT EXISTS place_preferences_area ON place_preferences(area_id,day,slot,updated_at)').run();
    await db.prepare('CREATE VIEW IF NOT EXISTS availability_records AS SELECT user_id,area_id,day,slot,MAX(updated_at) updated_at FROM (SELECT p.user_id,u.area_id,p.day,p.slot,p.updated_at FROM preferences p JOIN users u ON u.id=p.user_id WHERE u.area_id IS NOT NULL UNION ALL SELECT user_id,area_id,day,slot,updated_at FROM place_preferences) GROUP BY user_id,area_id,day,slot').run();
+   await db.prepare('CREATE TABLE IF NOT EXISTS app_migrations (id TEXT PRIMARY KEY)').run();
+   if(!await db.prepare("SELECT 1 FROM app_migrations WHERE id='my-places-v1'").first())await db.batch([
+    db.prepare('INSERT OR IGNORE INTO condo_favourites(user_id,area_id,created_at) SELECT user_id,area_id,0 FROM availability_locations'),
+    db.prepare('INSERT OR IGNORE INTO condo_favourites(user_id,area_id,created_at) SELECT u.id,u.area_id,0 FROM users u JOIN areas a ON a.id=u.area_id'),
+    db.prepare("INSERT OR IGNORE INTO app_migrations VALUES('my-places-v1')")
+   ]);
    await db.prepare('CREATE INDEX IF NOT EXISTS users_area ON users(area_id)').run();
    await db.prepare('CREATE INDEX IF NOT EXISTS preferences_fresh ON preferences(user_id,updated_at)').run();
    for(const [table,columns] of Object.entries(additions)){

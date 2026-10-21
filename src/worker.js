@@ -20,6 +20,13 @@ const cookie=(name,value,max)=>`${name}=${value}; Path=/; HttpOnly; SameSite=Lax
 const hash=async s=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))).map(x=>x.toString(16).padStart(2,'0')).join('');
 const cookies=req=>Object.fromEntries((req.headers.get('Cookie')||'').split(';').map(v=>v.trim().split('=')));
 export default {async scheduled(event,env){if(env.DB){await ensureSchema(env.DB);await env.DB.batch([env.DB.prepare('DELETE FROM games WHERE date<?').bind(singaporeDate()),env.DB.prepare('DELETE FROM sessions WHERE expires_at<=?').bind(now()),env.DB.prepare('DELETE FROM confirmations WHERE date<?').bind(singaporeDate())])}},async fetch(req,env){const started=performance.now();let response;try{response=await handle(req,env)}catch(e){console.error(e.message);response=json({error:'Something went wrong. Please try again.'},500)}if(new URL(req.url).pathname.startsWith('/api/')){response=new Response(response.body,response);response.headers.set('Server-Timing','app;dur='+(performance.now()-started).toFixed(1));}return response}};
+function removeMyPlace(db,uid,areaId){return [
+ db.prepare('DELETE FROM condo_favourites WHERE user_id=? AND area_id=?').bind(uid,areaId),
+ db.prepare('DELETE FROM availability_locations WHERE user_id=? AND area_id=?').bind(uid,areaId),
+ db.prepare('DELETE FROM place_preferences WHERE user_id=? AND area_id=?').bind(uid,areaId),
+ db.prepare('DELETE FROM preferences WHERE user_id=? AND EXISTS(SELECT 1 FROM users WHERE id=? AND area_id=?)').bind(uid,uid,areaId),
+ db.prepare('UPDATE users SET available_until=0,presence_area_id=NULL WHERE id=? AND COALESCE(presence_area_id,area_id)=?').bind(uid,areaId)
+]}
 function notify(db,game,actor,kind,body,ownerOnly=false){
  return db.prepare(`INSERT INTO notifications(id,user_id,game_id,kind,body,created_at)
  SELECT lower(hex(randomblob(16))),u.id,g.id,?,?,? FROM users u JOIN games g ON g.id=?
@@ -85,7 +92,7 @@ async function handle(req,env){
   if(typeof b.available!=='boolean'&&typeof b.share_map!=='boolean'&&typeof b.area_id!=='string')return json({error:'Choose your availability or map visibility.'},400);
   if(b.share_map===true&&user.area_id.startsWith('sg-pa-'))return json({error:'Select your selected place in Profile before sharing your map location.'},400);
   const placeId=b.area_id??user.presence_area_id??user.area_id;
-  if(!text(placeId,100)||!await db.prepare('SELECT id FROM areas WHERE id=?').bind(placeId).first())return json({error:'Choose a saved place.'},400);
+  if(!text(placeId,100)||!await db.prepare('SELECT 1 FROM condo_favourites WHERE user_id=? AND area_id=?').bind(uid,placeId).first())return json({error:'Add this location to My Places first.'},400);
   const until=typeof b.available==='boolean'?(b.available?now()+7200:0):user.available_until;
   const sharing=typeof b.share_map==='boolean'?(b.share_map?1:0):user.share_map;
   await db.prepare('UPDATE users SET available_until=?,share_map=?,presence_area_id=? WHERE id=?').bind(until,sharing,placeId,uid).run();
@@ -115,11 +122,11 @@ async function handle(req,env){
  }
  if(p==='/api/condos/favourites'&&['PUT','DELETE'].includes(req.method)){
   const b=await read();
-  if(!b||!text(b.area_id,100)||b.area_id.startsWith('sg-pa-')||!await db.prepare('SELECT id FROM areas WHERE id=?').bind(b.area_id).first())return json({error:'Choose a place from the search results.'},400);
-  if(req.method==='DELETE')await db.prepare('DELETE FROM condo_favourites WHERE user_id=? AND area_id=?').bind(uid,b.area_id).run();
+  if(!b||!text(b.area_id,100)||!await db.prepare('SELECT id FROM areas WHERE id=?').bind(b.area_id).first())return json({error:'Choose a place from the search results.'},400);
+  if(req.method==='DELETE')await db.batch(removeMyPlace(db,uid,b.area_id));
   else{
    const count=await db.prepare('SELECT COUNT(*) n FROM condo_favourites WHERE user_id=?').bind(uid).first();
-   if(count.n>=30&&!await db.prepare('SELECT 1 FROM condo_favourites WHERE user_id=? AND area_id=?').bind(uid,b.area_id).first())return json({error:'You can save up to 30 favourite places.'},400);
+   if(count.n>=30&&!await db.prepare('SELECT 1 FROM condo_favourites WHERE user_id=? AND area_id=?').bind(uid,b.area_id).first())return json({error:'You can save up to 30 places in My Places.'},400);
    await db.prepare('INSERT OR IGNORE INTO condo_favourites(user_id,area_id,created_at) VALUES(?,?,?)').bind(uid,b.area_id,now()).run();
   }
   return json({ok:true});
@@ -141,9 +148,9 @@ async function handle(req,env){
    db.prepare('SELECT id,name,legend_id,custom_name FROM decks WHERE user_id=?').bind(uid).all(),
    db.prepare('SELECT date,slot FROM confirmations WHERE user_id=? AND date>=?').bind(uid,singaporeDate()).all(),
    db.prepare('SELECT * FROM areas ORDER BY neighbourhood,name').all(),
-   db.prepare('SELECT a.* FROM areas a JOIN availability_locations l ON l.area_id=a.id WHERE l.user_id=? ORDER BY a.name').bind(uid).all(),
+   db.prepare('SELECT a.* FROM areas a JOIN condo_favourites l ON l.area_id=a.id WHERE l.user_id=? ORDER BY a.name').bind(uid).all(),
    db.prepare('SELECT area_id,day,slot FROM availability_records WHERE user_id=?').bind(uid).all()
-  ]);return json({user,preferences:preferences.results,decks:decks.results,confirmations:confirmations.results,areas:locationChoices(areas.results),availability_locations:locations.results,location_preferences:allPreferences.results});
+  ]);return json({user,preferences:preferences.results,decks:decks.results,confirmations:confirmations.results,areas:locationChoices(areas.results),my_places:locations.results,availability_locations:locations.results,location_preferences:allPreferences.results});
  }
  if(p==='/api/profile'&&req.method==='PUT'){
   const b=await read();
@@ -175,23 +182,22 @@ async function handle(req,env){
    db.prepare('INSERT OR IGNORE INTO areas(id,name,neighbourhood) VALUES(?,?,?)').bind(selected.id,selected.name,selected.neighbourhood),
    ...(geometry?[db.prepare('UPDATE areas SET latitude=COALESCE(latitude,?),longitude=COALESCE(longitude,?),address=CASE WHEN address=\'\' THEN ? ELSE address END,postal=CASE WHEN postal=\'\' THEN ? ELSE postal END WHERE id=?').bind(geometry.latitude,geometry.longitude,geometry.address,geometry.postal,selected.id)]:[]),
    db.prepare('UPDATE users SET username=?,area_id=?,style=?,share_condo=?,share_map=?,avatar_legend_id=? WHERE id=?').bind(b.username.trim(),selected.id,b.style,share,selected.id.startsWith('sg-pa-')?0:(b.share_map===undefined?user.share_map:b.share_map===true?1:0),avatar??null,uid),
+   db.prepare('INSERT OR IGNORE INTO condo_favourites(user_id,area_id,created_at) VALUES(?,?,?)').bind(uid,selected.id,now()),
    ...(decks===undefined?[]:deckStatements(db,uid,decks))
   ]);
   return json({ok:true,area:{...selected,kind:selected.id.startsWith('sg-pa-')?'neighbourhood':'condo'},decks:(await db.prepare('SELECT id,name,legend_id,custom_name FROM decks WHERE user_id=?').bind(uid).all()).results});
  }
  if(p==='/api/availability/locations'&&['POST','DELETE'].includes(req.method)){
   const b=await read();if(!text(b.area_id,100))return json({error:'Choose a place.'},400);
-  const planning=planningAreas.find(a=>a.id===b.area_id),area=planning||await db.prepare('SELECT * FROM areas WHERE id=?').bind(b.area_id).first();if(!area)return json({error:'Choose a saved place or a OneMap result.'},400);
-  if(req.method==='DELETE'){
-   await db.batch([db.prepare('DELETE FROM place_preferences WHERE user_id=? AND area_id=?').bind(uid,area.id),db.prepare('DELETE FROM availability_locations WHERE user_id=? AND area_id=?').bind(uid,area.id),...(area.id===user.area_id?[db.prepare('DELETE FROM preferences WHERE user_id=?').bind(uid)]:[])]);return json({ok:true});
-  }
-  const count=await db.prepare('SELECT count(*) n FROM availability_locations WHERE user_id=?').bind(uid).first();if(count.n>=10&&!await db.prepare('SELECT 1 FROM availability_locations WHERE user_id=? AND area_id=?').bind(uid,area.id).first())return json({error:'You can save up to ten availability places.'},400);
-  await db.batch([db.prepare('INSERT OR IGNORE INTO areas(id,name,neighbourhood) VALUES(?,?,?)').bind(area.id,area.name,area.neighbourhood||area.name),db.prepare('INSERT OR IGNORE INTO availability_locations VALUES(?,?)').bind(uid,area.id)]);return json({ok:true,area});
+  if(req.method==='DELETE'){await db.batch(removeMyPlace(db,uid,b.area_id));return json({ok:true})}
+  const area=await db.prepare('SELECT a.* FROM areas a JOIN condo_favourites f ON f.area_id=a.id WHERE f.user_id=? AND a.id=?').bind(uid,b.area_id).first();
+  if(!area)return json({error:'Add this location to My Places first.'},400);
+  return json({ok:true,area});
  }
  if(p==='/api/preferences'&&req.method==='PUT'){
   const b=await read(),areaId=b.area_id||user.area_id;if(!preferencesValid(b.preferences)||!text(areaId,100))return json({error:'Choose a place and valid availability.'},400);
   const area=await db.prepare('SELECT * FROM areas WHERE id=?').bind(areaId).first();if(!area)return json({error:'Add this place to your availability first.'},400);
-  if(areaId!==user.area_id&&!await db.prepare('SELECT 1 FROM availability_locations WHERE user_id=? AND area_id=?').bind(uid,areaId).first())return json({error:'Add this place to your availability first.'},400);
+  if(!await db.prepare('SELECT 1 FROM condo_favourites WHERE user_id=? AND area_id=?').bind(uid,areaId).first())return json({error:'Add this location to My Places first.'},400);
   await db.batch([...(areaId===user.area_id?[db.prepare('DELETE FROM preferences WHERE user_id=?').bind(uid)]:[]),db.prepare('DELETE FROM place_preferences WHERE user_id=? AND area_id=?').bind(uid,areaId),db.prepare('INSERT OR IGNORE INTO availability_locations VALUES(?,?)').bind(uid,areaId),...b.preferences.map(x=>db.prepare('INSERT INTO place_preferences VALUES(?,?,?,?,?)').bind(uid,areaId,x.day,x.slot,now()))]);return json({ok:true});
  }
  if(p==='/api/tonight'&&req.method==='PUT'){

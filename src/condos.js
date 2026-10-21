@@ -12,13 +12,13 @@ export async function condoStats(db,uid){
  SUM(CASE WHEN EXISTS(SELECT 1 FROM availability_records p WHERE p.user_id=u.id AND p.area_id=a.id AND p.updated_at>?) THEN 1 ELSE 0 END) usual_people,
  SUM(CASE WHEN EXISTS(SELECT 1 FROM availability_records p WHERE p.user_id=u.id AND p.area_id=a.id AND p.day=? AND p.slot=? AND p.updated_at>?) THEN 1 ELSE 0 END) usual_now
  FROM areas a LEFT JOIN users u ON (COALESCE(u.presence_area_id,u.area_id)=a.id OR EXISTS(SELECT 1 FROM availability_records f WHERE f.user_id=u.id AND f.area_id=a.id AND f.updated_at>${time-86400*60})) AND ${visible}
- WHERE a.id NOT LIKE 'sg-pa-%' GROUP BY a.id`).bind(time,time-86400*60,day,slot,time-86400*60,uid,uid).all()).results;
+ GROUP BY a.id`).bind(time,time-86400*60,day,slot,time-86400*60,uid,uid).all()).results;
 }
 export async function condoOverview(env,user){
  const home=user.area_id&&!user.area_id.startsWith('sg-pa-')?await env.DB.prepare('SELECT * FROM areas WHERE id=?').bind(user.area_id).first():null;
  const rows=await condoStats(env.DB,user.id);
  const favourites=(await env.DB.prepare('SELECT area_id FROM condo_favourites WHERE user_id=? ORDER BY created_at,area_id').bind(user.id).all()).results.map(r=>r.area_id);
- if(home&&!favourites.includes(home.id))favourites.unshift(home.id);
+
  const summary=a=>({...publicArea(a),available_now:Number(a.available_now||0),usual_people:Number(a.usual_people||0),usual_now:Number(a.usual_now||0),is_home:a.id===home?.id});
  let nearby=[];
  if(home?.latitude!=null&&home?.longitude!=null){

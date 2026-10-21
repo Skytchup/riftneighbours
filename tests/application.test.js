@@ -18,16 +18,16 @@ async function fixture({legacy=false}={}){const sql=new DatabaseSync(':memory:')
 test('Singapore date rolls over independently of UTC',()=>{assert.equal(singaporeDate(new Date('2026-10-16T16:01:00Z')),'2026-10-17');assert.equal(singaporeDay('2026-10-17'),6);assert.equal(validDate('2026-02-30'),false);assert.equal(preferencesValid([{day:7,slot:'evening'}]),false);assert.equal(preferencesValid([{day:1,slot:'evening'},{day:1,slot:'evening'}]),false)});
 test('authentication and cross-origin writes fail closed',async()=>{const {call}=await fixture();assert.equal((await call('me','GET',null,'invalid')).status,401);assert.equal((await call('tonight','PUT',{slot:'evening',available:true},'me','https://evil.test')).status,403)});
 
-test('condo favourites persist privately per account and always include the current home condo',async()=>{
+test('My Places persist privately and allow removing the profile place',async()=>{
  const {call,sql}=await fixture();
  let overview=await call('condos');assert.equal(overview.status,200);assert.equal(overview.data.favourites[0].id,'a');assert.equal(overview.data.favourites[0].is_home,true);
  assert.equal((await call('condos/favourites','PUT',{area_id:'b'})).status,200);
  assert.equal((await call('condos/favourites','PUT',{area_id:'b'})).status,200);
  assert.equal((await call('condos')).data.favourites.length,2);
  assert.equal((await call('condos','GET',null,'other')).data.favourites.length,1);
- await call('condos/favourites','DELETE',{area_id:'a'});assert.equal((await call('condos')).data.favourites[0].id,'a');
- await call('condos/favourites','DELETE',{area_id:'b'});assert.equal((await call('condos')).data.favourites.length,1);
- assert.equal(sql.prepare('SELECT count(*) n FROM condo_favourites').get().n,0);
+ await call('condos/favourites','DELETE',{area_id:'a'});assert.equal((await call('condos')).data.favourites[0].id,'b');
+ await call('condos/favourites','DELETE',{area_id:'b'});assert.equal((await call('condos')).data.favourites.length,0);
+ assert.equal(sql.prepare('SELECT count(*) n FROM condo_favourites WHERE user_id=\'me\'').get().n,0);
  assert.equal((await call('condos/favourites','PUT',{area_id:'unknown'})).status,400);
  assert.equal((await call('condos','GET',null,'invalid')).status,401);
 });
@@ -437,7 +437,7 @@ test('Morning and Lunch break use Singapore boundaries and all 35 weekly slots a
 test('availability places have independent private schedules and preserve legacy preferences',async()=>{
  const {call,sql}=await fixture();await call('me');sql.prepare('INSERT INTO preferences VALUES(?,?,?,?)').run('me',1,'evening',Math.floor(Date.now()/1000));
  assert.equal((await call('preferences','PUT',{area_id:'b',preferences:[{day:2,slot:'lunch'}]})).status,400);
- assert.equal((await call('availability/locations','POST',{area_id:'b'})).status,200);
+ assert.equal((await call('availability/locations','POST',{area_id:'b'})).status,400);await call('condos/favourites','PUT',{area_id:'b'});assert.equal((await call('availability/locations','POST',{area_id:'b'})).status,200);
  assert.equal((await call('preferences','PUT',{area_id:'b',preferences:[{day:2,slot:'lunch'}]})).status,200);
  let me=(await call('me')).data;assert.equal(me.preferences[0].slot,'evening');assert.equal(me.location_preferences.length,2);
  assert.equal((await call('me','GET',null,'other')).data.location_preferences.length,0);
@@ -450,17 +450,33 @@ test('availability places have independent private schedules and preserve legacy
 test('multiple nearby availability places count the same player once in overall totals',async t=>{
  t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-20T04:30:00Z')});const {call,sql}=await fixture();await call('me');
  for(const [id,lat] of [['a',1.35],['b',1.351]])sql.prepare('UPDATE areas SET latitude=?,longitude=? WHERE id=?').run(lat,103.87,id);
- for(const area_id of ['a','b']){await call('availability/locations','POST',{area_id},'other');await call('preferences','PUT',{area_id,preferences:[{day:2,slot:'lunch'}]},'other')}
+ for(const area_id of ['a','b']){await call('condos/favourites','PUT',{area_id},'other');await call('availability/locations','POST',{area_id},'other');await call('preferences','PUT',{area_id,preferences:[{day:2,slot:'lunch'}]},'other')}
  const d=(await call('discovery')).data;assert.equal(d.usual_total,1);assert.equal(d.groups.reduce((n,g)=>n+g.usual_count,0),2);assert.ok(!JSON.stringify(d).includes('secret-name'));
 });
 
 test('top-bar place moves ready counts and map centre without changing profile or schedules',async()=>{
  const {call,sql}=await fixture();await call('me');for(const [id,lat] of [['a',1.35],['b',1.351]])sql.prepare('UPDATE areas SET latitude=?,longitude=? WHERE id=?').run(lat,103.87,id);
  await call('preferences','PUT',{preferences:[{day:1,slot:'morning'}]});await call('presence','PUT',{available:true});const expiry=(await call('me')).data.user.available_until;
- const changed=await call('presence','PUT',{area_id:'b'});assert.equal(changed.status,200);assert.equal(changed.data.available_until,expiry);
+ await call('condos/favourites','PUT',{area_id:'b'});const changed=await call('presence','PUT',{area_id:'b'});assert.equal(changed.status,200);assert.equal(changed.data.available_until,expiry);
  const me=(await call('me')).data;assert.equal(me.user.area_id,'a');assert.equal(me.user.presence_area_id,'b');assert.equal(me.location_preferences[0].area_id,'a');
  assert.equal((await call('discovery')).data.home.name,'Other estate');const others=(await call('discovery','GET',null,'other')).data;assert.equal(others.groups.find(g=>g.id==='b').ready_count,1);assert.equal(others.groups.find(g=>g.id==='a')?.ready_count||0,0);
  const places=(await call('condos','GET',null,'other')).data;assert.equal(places.favourites.find(p=>p.id==='a').available_now,0);
  await call('presence','PUT',{available:false});assert.equal((await call('discovery','GET',null,'other')).data.ready_total,0);
  assert.equal((await call('presence','PUT',{area_id:'forged'})).status,400);assert.equal((await call('me')).data.user.presence_area_id,'b');
+});
+
+
+test('My Places gate both schedules and presence and removal clears contributions',async()=>{
+ const {call}=await fixture();await call('me');
+ assert.equal((await call('preferences','PUT',{area_id:'b',preferences:[{day:1,slot:'morning'}]})).status,400);
+ assert.equal((await call('presence','PUT',{area_id:'b',available:true})).status,400);
+ await call('condos/favourites','PUT',{area_id:'b'});
+ assert.ok((await call('me')).data.my_places.some(p=>p.id==='b'));
+ assert.equal((await call('preferences','PUT',{area_id:'b',preferences:[{day:1,slot:'morning'}]})).status,200);
+ await call('presence','PUT',{area_id:'b',available:true});await call('condos/favourites','DELETE',{area_id:'b'});
+ let me=(await call('me')).data;assert.equal(me.user.available_until,0);assert.ok(!me.my_places.some(p=>p.id==='b'));assert.ok(!me.location_preferences.some(p=>p.area_id==='b'));
+ assert.equal((await call('preferences','PUT',{area_id:'b',preferences:[]})).status,400);
+ assert.equal((await call('presence','PUT',{area_id:'b'})).status,400);
+ await call('condos/favourites','DELETE',{area_id:'a'});me=(await call('me')).data;assert.equal(me.my_places.length,0);
+ assert.equal((await call('preferences','PUT',{preferences:[{day:1,slot:'morning'}]})).status,400);
 });
