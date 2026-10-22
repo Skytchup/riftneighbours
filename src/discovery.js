@@ -40,11 +40,11 @@ export async function discover(env,user,{scope='area',radius=5}={}){
   if(scope==='condo'&&row.area_id!==selectedArea)continue;
   const mapped=row.latitude!=null&&row.longitude!=null;
   const distance=mapped&&centered?distanceKm(home,row):null;
-  if(centered&&mapped&&distance>radius)continue;
-  if((!centered||!mapped)&&row.neighbourhood!==home.neighbourhood)continue;
+  const outsideRadius=centered&&mapped?distance>radius:row.neighbourhood!==home.neighbourhood;
+  if(outsideRadius&&row.available_until<=time)continue;
   if(!mapped){unmapped++;continue}
-  if(!groups.has(row.area_id))groups.set(row.area_id,{id:row.area_id,name:row.name,address:row.address,latitude:row.latitude,longitude:row.longitude,distance:distance==null?null:Math.round(distance*10)/10,ready_count:0,usual_count:0,total_count:0});
-  const group=groups.get(row.area_id);group.total_count++;if(row.available_until>time){group.ready_count++;readyPeople.add(row.id)}if(row.usual){group.usual_count++;usualPeople.add(row.id)}
+  if(!groups.has(row.area_id))groups.set(row.area_id,{id:row.area_id,name:row.name,address:row.address,latitude:row.latitude,longitude:row.longitude,distance:distance==null?null:Math.round(distance*10)/10,outside_radius:outsideRadius,ready_count:0,usual_count:0,total_count:0});
+  const group=groups.get(row.area_id);group.total_count++;if(row.available_until>time){group.ready_count++;readyPeople.add(row.id)}if(row.usual&&!outsideRadius){group.usual_count++;usualPeople.add(row.id)}
  }
  return {groups:[...groups.values()].sort((a,b)=>(a.distance??0)-(b.distance??0)),home:{name:home.name,latitude:home.latitude,longitude:home.longitude},ready_total:readyPeople.size+(user.available_until>time?1:0),usual_total:usualPeople.size+(ownSchedule?1:0),self_status,self_usual:Boolean(ownSchedule),slot,date:today,radius,unmapped};
 }
