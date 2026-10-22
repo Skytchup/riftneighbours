@@ -242,3 +242,5 @@ main:has(>.condo-search){max-width:1240px;padding:20px 20px 40px}
 .all-availability-grid .editing-slot{outline:2px solid #FA6906;outline-offset:1px}
 .all-slot-places{display:flex;flex-wrap:wrap;gap:8px 20px;margin:12px 0}
 .all-slot-places label{margin:0}
+
+.status-dot.outside,.player-marker.is-outside{background:#3987d5}.player-marker.is-outside{color:#fff;border-color:#b3d7ff}
