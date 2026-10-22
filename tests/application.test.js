@@ -118,7 +118,7 @@ test('map discovery uses current SGT schedule, anonymous defaults, exact coordin
  sql.prepare('UPDATE areas SET latitude=?,longitude=?,address=? WHERE id=?').run(1.36,103.88,'2 Example Road','b');
  sql.prepare('UPDATE areas SET latitude=?,longitude=? WHERE id=?').run(1.45,103.75,'c');
  sql.prepare('UPDATE users SET available_until=?').run(Math.floor(Date.now()/1000)+7200);
- assert.equal((await call('discovery')).data.groups.length,2); // anonymous presence is included by default
+ assert.equal((await call('discovery')).data.groups.length,3); // anonymous presence is included by default
  sql.prepare('UPDATE users SET share_map=1,available_until=0').run();
  sql.prepare('UPDATE users SET available_until=? WHERE id=?').run(Math.floor(Date.now()/1000)+7200,'other');
  for(const uid of ['other','third','far'])sql.prepare('INSERT INTO preferences VALUES(?,?,?,?)').run(uid,singaporeDay(singaporeDate()),'evening',Math.floor(Date.now()/1000));
@@ -506,4 +506,20 @@ test('walking estimates, map and game context follow the current top-bar place',
  assert.ok((await call('games')).data.games.some(g=>g.id===id));
  await call('presence','PUT',{area_id:'a'});assert.ok(!(await call('games')).data.games.some(g=>g.id===id));
  assert.ok((await call('my-games')).data.games.some(g=>g.id===id));
+});
+
+test('ready players remain visible island-wide while distant usual schedules are excluded',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-22T10:30:00Z')});
+ const {call,sql}=await fixture();await call('me');
+ for(const [id,lat] of [['a',1.35],['b',1.54],['c',1.55]])sql.prepare('UPDATE areas SET latitude=?,longitude=? WHERE id=?').run(lat,103.87,id);
+ await call('condos/favourites','PUT',{area_id:'b'},'other');await call('presence','PUT',{area_id:'b',available:true},'other');
+ const stamp=Math.floor(Date.now()/1000),day=singaporeDay(singaporeDate());
+ for(const uid of ['third','far'])sql.prepare('INSERT INTO preferences VALUES(?,?,?,?)').run(uid,day,'evening',stamp);
+ await call('preferences','PUT',{area_id:'b',preferences:[{day,slot:'evening'}]},'other');
+ for(const radius of [0.5,1,2,5]){
+  const d=(await call('discovery?radius='+radius)).data;assert.equal(d.groups.length,1);
+  const g=d.groups[0];assert.equal(g.id,'b');assert.ok(g.distance>20);assert.equal(g.outside_radius,true);assert.equal(g.ready_count,1);assert.equal(g.usual_count,0);assert.equal(g.total_count,1);
+  assert.equal(d.ready_total,1);assert.equal(d.usual_total,0);assert.ok(!JSON.stringify(d).includes('secret-name'));
+ }
+ await call('blocks','POST',{user_id:'other'});assert.equal((await call('discovery')).data.groups.length,0);
 });
