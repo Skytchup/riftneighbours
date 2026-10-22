@@ -12,11 +12,11 @@ export function mountMap(element,data,onSelect){
  if(hasHome){positions.push(home);L.circleMarker(home,{radius:5,color:'#FA6906',weight:2,fillColor:'#FA6906',fillOpacity:1}).addTo(map).bindPopup('Your selected place · '+esc(data.home.name)+(data.self_status==='now'?'<br>You are Ready to Play':data.self_status==='usual'?'<br>Your schedule matches this slot':''),{className:'selected-place-popup',maxWidth:220})}
  for(const group of data.groups){
   const available=group.ready_count;
-  const marker=L.marker([group.latitude,group.longitude],{icon:L.divIcon({className:'player-marker-wrap',html:`<span class="player-marker ${available?'is-now':'is-usual'}">${group.total_count}</span>`,iconSize:[42,42],iconAnchor:[21,42]}),title:group.name+' · '+group.total_count+' players',alt:group.name});
-  marker.addTo(map).bindPopup(`<div class="map-popup"><strong>${esc(group.name)}</strong><p>${esc(group.address)}</p><div><span class="status-dot now"></span> ${group.ready_count} Ready to Play</div><div><span class="status-dot usual"></span> ${group.usual_count} usually available</div></div>`,{maxWidth:280});
+  const marker=L.marker([group.latitude,group.longitude],{icon:L.divIcon({className:'player-marker-wrap',html:`<span class="player-marker ${group.outside_radius?'is-outside':available?'is-now':'is-usual'}">${group.total_count}</span>`,iconSize:[42,42],iconAnchor:[21,42]}),title:group.name+' · '+group.total_count+' players',alt:group.name});
+  marker.addTo(map).bindPopup(`<div class="map-popup"><strong>${esc(group.name)}</strong><p>${esc(group.address)}</p><div><span class="status-dot ${group.outside_radius?'outside':'now'}"></span> ${group.ready_count} Ready to Play${group.outside_radius?' · outside your radius':''}</div>${group.outside_radius?'':`<div><span class="status-dot usual"></span> ${group.usual_count} usually available</div>`}</div>`,{maxWidth:280});
   marker.on('click',()=>onSelect(group.id));markers.set(group.id,marker);positions.push([group.latitude,group.longitude]);
  }
- function fitSearchArea(){if(searchCircle)map.fitBounds(searchCircle.getBounds(),{padding:[24,24],maxZoom:15,animate:false});else if(positions.length>1)map.fitBounds(positions,{padding:[50,50],maxZoom:15,animate:false})}
+ function fitSearchArea(){if(searchCircle){const bounds=searchCircle.getBounds();if(data.groups.some(g=>g.outside_radius))positions.forEach(p=>bounds.extend(p));map.fitBounds(bounds,{padding:[24,24],maxZoom:15,animate:false})}else if(positions.length>1)map.fitBounds(positions,{padding:[50,50],maxZoom:15,animate:false})}
  requestAnimationFrame(()=>{map.invalidateSize();fitSearchArea()});
  return {destroy(){map.remove()},focus(id){const marker=markers.get(id);if(marker){map.panTo(marker.getLatLng());marker.openPopup()}}};
 }
