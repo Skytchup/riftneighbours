@@ -244,3 +244,19 @@ main:has(>.condo-search){max-width:1240px;padding:20px 20px 40px}
 .all-slot-places label{margin:0}
 
 .status-dot.outside,.player-marker.is-outside{background:#3987d5}.player-marker.is-outside{color:#fff;border-color:#b3d7ff}
+
+/* Direct, central Play navigation and page-local ready control. */
+.site-topbar header{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:16px}
+.site-topbar header>.brand{justify-self:start}
+.site-topbar header>nav{margin:0;width:auto;order:initial;justify-self:center}
+.header-tools{display:flex;align-items:center;justify-content:flex-end;gap:14px;min-width:0}
+.header-tools .presence-place-label{font-size:11px;flex-wrap:wrap;gap:3px;max-width:220px}
+.header-tools #presence-place{max-width:210px;min-width:100px}
+.header-tools #account-menu{margin:0}
+#play-menu.header-play{min-width:110px;padding:10px 24px;border:1px solid #a98d55;background:#102c43;color:#eee4cd;font-weight:700;font-size:15px}
+#play-menu.header-play.is-current{border-color:#FA6906;color:#fff0e5}
+.nearby-presence{display:flex;justify-content:center;margin:0 0 20px}
+.nearby-presence .rift-presence{margin:0;order:initial;flex:0 1 auto;width:auto;max-width:none}
+#available-now[hidden],#presence-storage[hidden],header nav[hidden],#account-menu[hidden]{display:none}
+@media(max-width:1100px){.site-topbar header{grid-template-columns:minmax(0,1fr) auto}.site-topbar header>nav{grid-column:1/-1;grid-row:2}.header-tools{display:contents}.header-tools #account-menu{grid-column:2;grid-row:1;justify-self:end}.header-tools .presence-place-label{grid-column:1/-1;grid-row:3;justify-self:center;flex-wrap:nowrap;max-width:none}.header-tools #presence-place{max-width:250px}}
+@media(max-width:560px){.site-topbar header{gap:10px}.header-tools #account-menu summary{max-width:145px}#account-username{overflow:hidden;text-overflow:ellipsis}.nearby-presence{margin-bottom:16px}}
