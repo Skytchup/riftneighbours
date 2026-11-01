@@ -1,5 +1,5 @@
-import {showCondos} from './condo-view.js';
-import {mountMap,visibleGroups} from './nearby-map.js';
+import {showCondos} from './condo-view.js?v=20261101-nav2';
+import {mountMap,visibleGroups} from './nearby-map.js?v=20261101-nav2';
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let activeMap=null,chosenFilter='all';
 export function disposeDiscovery(){activeMap?.destroy();activeMap=null}
